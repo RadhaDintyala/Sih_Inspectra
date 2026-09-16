@@ -1,0 +1,9 @@
+package
+label_wrapper
+product_name
+mrp
+net_quantity
+date
+manufacturer
+consumer_care
+country_of_origin

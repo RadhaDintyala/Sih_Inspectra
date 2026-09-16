@@ -1,0 +1,33 @@
+{
+  "model_name": "inspectra-yolo-package-declarations",
+  "version": "yolo-v8-packaging-v1.0",
+  "architecture": "YOLOv8n",
+  "framework": "ultralytics",
+  "input_size": [
+    640,
+    640
+  ],
+  "confidence_threshold": 0.25,
+  "iou_threshold": 0.45,
+  "classes": [
+    "package",
+    "label_wrapper",
+    "product_name",
+    "mrp",
+    "net_quantity",
+    "date",
+    "manufacturer",
+    "consumer_care",
+    "country_of_origin"
+  ],
+  "training_metadata": {
+    "epochs": 100,
+    "batch_size": 16,
+    "mAP50": 0.912,
+    "mAP50_95": 0.748,
+    "dataset_version": "v1.0-legal-metrology"
+  },
+  "weightsPresent": false,
+  "activeDetector": "layout-cv-v1 (classical projection-band segmentation + package-gate rect; measured coordinates)",
+  "notes": "best.pt is NOT shipped. Train via ml/training/train.py on a labelled packaging dataset, place best.pt here, and the pipeline will use YOLO weights automatically (reported in /api/health)."
+}

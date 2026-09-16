@@ -1,0 +1,19 @@
+# YOLO Legal Metrology Package Detection Dataset Configuration
+# Classes correspond to statutory declarations under LM (PC) Rules, 2011
+
+path: ./ml/dataset
+train: images/train
+val: images/val
+test: images/test
+
+# Classes
+names:
+  0: package
+  1: label_wrapper
+  2: product_name
+  3: mrp
+  4: net_quantity
+  5: date
+  6: manufacturer
+  7: consumer_care
+  8: country_of_origin

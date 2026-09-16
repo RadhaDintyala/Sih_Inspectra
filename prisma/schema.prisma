@@ -1,0 +1,292 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Organization {
+  id           String             @id @default(uuid())
+  code         String             @unique
+  name         String
+  jurisdiction String?
+  active       Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  users        User[]
+  inspections  InspectionRecord[]
+  reports      ReportRecord[]
+  auditLogs    AuditLog[]
+}
+
+model User {
+  id             String                    @id @default(uuid())
+  organizationId String
+  username       String                    @unique
+  passwordHash   String
+  name           String
+  role           String // "ADMIN" | "ENFORCEMENT_OFFICER" | "REVIEWER"
+  badgeNumber    String?
+  active         Boolean                   @default(true)
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  organization   Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inspections    InspectionRecord[]
+  auditLogs      AuditLog[]
+  reports        ReportRecord[]
+  statusChanges  InspectionStatusHistory[]
+  verifications  VerificationRecord[]
+
+  @@index([organizationId])
+}
+
+model InspectionRecord {
+  id               String                    @id
+  organizationId   String
+  userId           String?
+  createdAt        String
+  updatedAt        DateTime                  @default(now()) @updatedAt
+  productId        String?
+  productName      String?
+  status           String // "processing" | "pass" | "fail" | "review" | "invalid_evidence" | "incomplete"
+  verdict          String? // "COMPLIANT" | "NON_COMPLIANT" | "REQUIRES_REVIEW" | "INVALID_EVIDENCE" | "INCOMPLETE" | "PROCESSING"
+  processingStatus String                    @default("COMPLETED")
+  score            Int?
+  rawOcrText       String?
+  extractionSource String?
+  source           String? // "camera" | "upload" | "live_feed" | "ecommerce"
+  ecommerceUrl     String?
+  ecommerceJson    String?
+  physicalMeasurementsJson String?
+  manufacturerName String?
+  packageCategory  String?
+  notesJson        String                    @default("[]")
+  sourceDocIdsJson String?
+  processingJson   String?
+  organization     Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user             User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  images           EvidenceImageRecord[]
+  declarations     DeclarationRecord[]
+  checks           ComplianceCheckRecord[]
+  reports          ReportRecord[]
+  statusHistory    InspectionStatusHistory[]
+  verifications    VerificationRecord[]
+  physicalMeasurements PhysicalMeasurementRecord[]
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, status])
+  @@index([userId])
+}
+
+model EvidenceImageRecord {
+  id               String            @id
+  inspectionId     String
+  storageKey       String?
+  uri              String
+  filename         String?
+  mimeType         String?
+  side             String? // "front" | "back" | "side" | "top" | "unknown"
+  width            Int
+  height           Int
+  checksum         String?
+  quality          String?
+  qualitySignal    String?
+  processingStatus String            @default("COMPLETED") // "UPLOADING" | "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED"
+  createdAt        DateTime          @default(now())
+  inspection       InspectionRecord  @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  detections       DetectionRecord[]
+  ocrResults       OcrRecord[]
+
+  @@index([inspectionId])
+  @@index([processingStatus])
+}
+
+model DetectionRecord {
+  id              String              @id @default(uuid())
+  evidenceImageId String
+  modelVersion    String              @default("yolo-v8-packaging-v1.0")
+  detector        String              @default("layout-cv") // "yolo-weights" | "layout-cv" | "package-gate"
+  className       String // "mrp" | "net_quantity" | "date" | "manufacturer" | "consumer_care" | "product_name" | "country_of_origin" | "package"
+  bboxJson        String // { x: number, y: number, width: number, height: number } — measured 0–100 % coords
+  confidence      Float
+  createdAt       DateTime            @default(now())
+  evidenceImage   EvidenceImageRecord @relation(fields: [evidenceImageId], references: [id], onDelete: Cascade)
+  ocrResults      OcrRecord[]
+
+  @@index([evidenceImageId])
+  @@index([className])
+}
+
+model OcrRecord {
+  id              String              @id @default(uuid())
+  evidenceImageId String
+  detectionId     String?
+  engine          String              @default("Tesseract-WASM")
+  modelVersion    String              @default("eng-v1")
+  rawText         String
+  normalizedText  String?
+  confidence      Float
+  processingPass  Int                 @default(1)
+  createdAt       DateTime            @default(now())
+  evidenceImage   EvidenceImageRecord @relation(fields: [evidenceImageId], references: [id], onDelete: Cascade)
+  detection       DetectionRecord?    @relation(fields: [detectionId], references: [id], onDelete: SetNull)
+
+  @@index([evidenceImageId])
+}
+
+model DeclarationRecord {
+  id               String               @id @default(uuid())
+  inspectionId     String
+  field            String
+  value            String?
+  rawValue         String?
+  normalizedValue  String?
+  status           String // "DETECTED" | "NOT_DETECTED" | "UNCERTAIN" | "CONFLICT"
+  confidence       Float?
+  evidenceImageId  String?
+  evidenceImgIds   String?
+  candidates       String?
+  evidenceJson     String?
+  boundingBox      String?
+  polygonJson      String?
+  sourceSide       String?
+  conflict         Boolean?
+  consumerCareJson String?
+  legalRulesJson   String?
+  inspection       InspectionRecord     @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  verifications    VerificationRecord[]
+
+  @@index([inspectionId])
+  @@index([field])
+}
+
+model PhysicalMeasurementRecord {
+  id              String           @id @default(uuid())
+  inspectionId    String
+  field           String           @default("net_quantity")
+  declaredValue   String
+  measuredValue   String
+  unit            String
+  permissibleError String?
+  withinTolerance Boolean?
+  measuredBy      String?
+  measuredAt      DateTime         @default(now())
+  instrumentId    String?
+  notes           String?
+  inspection      InspectionRecord @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+
+  @@index([inspectionId])
+}
+
+model VerificationRecord {
+  id             String            @id @default(uuid())
+  declarationId  String
+  inspectionId   String
+  officerId      String
+  originalValue  String?
+  correctedValue String
+  action         String // "ACCEPTED" | "CORRECTED" | "MARKED_UNREADABLE" | "MARKED_UNAVAILABLE"
+  rationale      String
+  createdAt      DateTime          @default(now())
+  declaration    DeclarationRecord @relation(fields: [declarationId], references: [id], onDelete: Cascade)
+  inspection     InspectionRecord  @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  officer        User              @relation(fields: [officerId], references: [id], onDelete: Restrict)
+
+  @@index([inspectionId, createdAt])
+  @@index([declarationId, createdAt])
+}
+
+model ComplianceCheckRecord {
+  id                 String           @id @default(uuid())
+  inspectionId       String
+  ruleId             String
+  field              String
+  status             String // "pass" | "fail" | "review" | "not_applicable" | "not_evaluated"
+  severity           String           @default("major") // "critical" | "major" | "minor"
+  validationType     String?
+  evidence           String?
+  explanation        String
+  confidence         Float?
+  evidenceImageId    String?
+  boundingBox        String?
+  polygonJson        String?
+  sourceDocument     String?
+  sourceUrl          String?
+  sourceSection      String?
+  officerVerification String?
+  officerNote        String?
+  inspection         InspectionRecord @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+
+  @@index([inspectionId])
+  @@index([ruleId, status])
+}
+
+model ComplianceRule {
+  id               String   @id @default(uuid())
+  ruleId           String   @unique
+  ruleNumber       Int?
+  subRule          String?
+  name             String
+  description      String
+  field            String
+  severity         String // "critical" | "major" | "minor"
+  requirement      String
+  validationType   String?
+  referenceSection String
+  sourceDocument   String
+  sourceUrl        String?
+  effectiveDate    String?
+  version          String   @default("2011.1")
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model ReportRecord {
+  id             String           @id @default(uuid())
+  inspectionId   String
+  organizationId String
+  generatedById  String?
+  reportDataJson String
+  pdfStorageKey  String?
+  createdAt      DateTime         @default(now())
+  inspection     InspectionRecord @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  generatedBy    User?            @relation(fields: [generatedById], references: [id], onDelete: SetNull)
+
+  @@index([inspectionId])
+  @@index([organizationId])
+}
+
+model AuditLog {
+  id             String       @id @default(uuid())
+  organizationId String
+  userId         String?
+  action         String // "LOGIN" | "INSPECTION_CREATED" | "EVIDENCE_UPLOADED" | "ANALYSIS_COMPLETED" | "MANUAL_OVERRIDE" | "REPORT_GENERATED"
+  entityType     String // "INSPECTION" | "USER" | "EVIDENCE"
+  entityId       String
+  detailsJson    String       @default("{}")
+  timestamp      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, timestamp])
+  @@index([entityId])
+  @@index([action])
+}
+
+model InspectionStatusHistory {
+  id           String           @id @default(uuid())
+  inspectionId String
+  fromStatus   String?
+  toStatus     String
+  changedById  String?
+  reason       String?
+  createdAt    DateTime         @default(now())
+  inspection   InspectionRecord @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  changedBy    User?            @relation(fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@index([inspectionId, createdAt])
+}
