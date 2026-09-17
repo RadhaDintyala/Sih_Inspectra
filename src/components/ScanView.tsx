@@ -183,6 +183,16 @@ export function ScanView({
     };
   }, [cameraOpen, liveDetectEnabled]);
 
+  // Tier 0 Classical CV Frame Diagnostics State (100% Client-Side, 0ms latency)
+  const [tier0Result, setTier0Result] = useState<FrameAnalysisResult | null>(null);
+
+  // Server-side package-presence confirmation (same gate as the pipeline).
+  // READY is shown only after the backend confirms a package in-frame.
+  const [serverGate, setServerGate] = useState<{
+    state: "LOOKING" | "PACKAGE_NOT_DETECTED" | "PACKAGE_DETECTED" | "CAPTURE_READY" | "QUALITY_INSUFFICIENT";
+    tip: string;
+  } | null>(null);
+
   // Feed the latest Tier-0 quality and server package-gate state into the
   // engine's dispatch policy (smart dispatch: no OCR while blurry/no package).
   useEffect(() => {
@@ -281,15 +291,6 @@ export function ScanView({
   const rotationRef = useRef(rotation);
   rotationRef.current = rotation;
 
-  // Tier 0 Classical CV Frame Diagnostics State (100% Client-Side, 0ms latency)
-  const [tier0Result, setTier0Result] = useState<FrameAnalysisResult | null>(null);
-
-  // Server-side package-presence confirmation (same gate as the pipeline).
-  // READY is shown only after the backend confirms a package in-frame.
-  const [serverGate, setServerGate] = useState<{
-    state: "LOOKING" | "PACKAGE_NOT_DETECTED" | "PACKAGE_DETECTED" | "CAPTURE_READY" | "QUALITY_INSUFFICIENT";
-    tip: string;
-  } | null>(null);
   const gateInFlightRef = useRef(false);
   const gateCheck = async () => {
     const video = videoRef.current;

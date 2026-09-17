@@ -22,15 +22,18 @@ COPY prisma ./prisma/
 # Install Node dependencies
 RUN npm ci
 
-# Create Python virtual environment and install ML requirements
-RUN python3 -m venv /app/.venv && \
-    /app/.venv/bin/pip install --no-cache-dir pillow pypdf
-
 # Generate Prisma Client
 RUN npx prisma generate
 
 # Copy application source code
 COPY . .
+
+# Build Next.js application
+RUN npm run build
+
+# Create Python virtual environment and install ML requirements
+RUN python3 -m venv /app/.venv && \
+    /app/.venv/bin/pip install --no-cache-dir pillow pypdf
 
 # Set environment
 ENV NODE_ENV=production
@@ -41,4 +44,4 @@ ENV HOSTNAME="0.0.0.0"
 EXPOSE 3000
 
 # Apply database migrations, seed statutory data, then serve.
-CMD ["sh", "-c", "npx prisma migrate deploy && node prisma/seed.ts && npm run start"]
+CMD ["sh", "-c", "npx prisma migrate deploy && npm run seed && npm run start"]

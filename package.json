@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:e2e": "TEST_MODE=true playwright test",
     "worker": "tsx src/worker/runner.ts",
-    "seed": "node prisma/seed.ts",
+    "seed": "tsx prisma/seed.ts",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy"
   },
