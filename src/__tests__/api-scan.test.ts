@@ -69,7 +69,7 @@ describe("POST /api/scan integration", () => {
     expect(data.extractionSource).toBe("YOLO + Regional OCR");
 
     const inspection = data.inspection;
-    expect(inspection.id).toMatch(/^INSP-\d{4}-\d{4}$/);
+    expect(inspection.id).toMatch(/^INSP-\d{4}-[A-Z0-9]+$/);
     expect(inspection.createdAt).toBeDefined();
     expect(inspection.status).not.toBe("invalid_evidence");
 

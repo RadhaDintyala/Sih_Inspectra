@@ -47,9 +47,12 @@ def get_ocr_engine() -> RapidOCR:
     """
     global _OCR_ENGINE
     if _OCR_ENGINE is None:
-        text_score = float(os.environ.get("OCR_TEXT_SCORE", "0.45"))
-        box_thresh = float(os.environ.get("OCR_BOX_THRESH", "0.30"))
-        _OCR_ENGINE = RapidOCR(text_score=text_score, det_box_thresh=box_thresh)
+        try:
+            text_score = float(os.environ.get("OCR_TEXT_SCORE", "0.45"))
+            box_thresh = float(os.environ.get("OCR_BOX_THRESH", "0.30"))
+            _OCR_ENGINE = RapidOCR(text_score=text_score, det_box_thresh=box_thresh)
+        except Exception:
+            _OCR_ENGINE = RapidOCR()
     return _OCR_ENGINE
 
 
@@ -147,15 +150,6 @@ def run_paddle_ocr(image: np.ndarray, engine: RapidOCR) -> List[Dict[str, Any]]:
     
     lines = []
     if not results:
-        # Try 90 degree rotation if initial read was completely empty (e.g. sideways packaging)
-        rotated_90 = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-        results_90, _ = engine(rotated_90)
-        if results_90 and len(results_90) > 3:
-            image = rotated_90
-            h, w = image.shape[:2]
-            results = results_90
-
-    if not results:
         return []
 
     for item in results:
@@ -163,7 +157,17 @@ def run_paddle_ocr(image: np.ndarray, engine: RapidOCR) -> List[Dict[str, Any]]:
         text = str(text).strip()
         if not text:
             continue
-            
+
+        # ── Fix 1 (revised): absolute-junk confidence floor only ─────────────
+        # We use a very low floor (0.20) to discard pure random-noise tokens
+        # (character hallucinations on blank/gradient areas) WITHOUT sacrificing
+        # recall on faint statutory fine-print, which can legitimately score
+        # 0.25–0.40 on busy brand panels.
+        # DO NOT raise this threshold — downstream plausibility gates are the
+        # right place to reject weak candidates, not here.
+        if float(score) < 0.20:
+            continue
+
         xs = [p[0] for p in box]
         ys = [p[1] for p in box]
         min_x, max_x = max(0, min(xs)), min(w, max(xs))
@@ -171,6 +175,15 @@ def run_paddle_ocr(image: np.ndarray, engine: RapidOCR) -> List[Dict[str, Any]]:
         
         box_w = max_x - min_x
         box_h = max_y - min_y
+
+        # ── Fix 1 (revised): reject only truly degenerate geometry ────────────
+        # A bbox with width or height < 2 px is invalid geometry (the detector
+        # misfired on a hairline artefact). We do NOT apply an area-percentage
+        # cutoff because small-but-valid text (e.g. a 14-char "Net Wt 200 g"
+        # line in 8pt font on a large hi-res photo) would be silently discarded,
+        # destroying recall on exactly the statutory fine print we need most.
+        if box_w < 2 or box_h < 2:
+            continue
         
         bbox = {
             "x": round((min_x / w) * 100, 2),
@@ -186,7 +199,8 @@ def run_paddle_ocr(image: np.ndarray, engine: RapidOCR) -> List[Dict[str, Any]]:
             "confidence": round(float(score), 3),
             "bbox": bbox,
             "polygon": polygon,
-            "raw_box": box
+            "raw_box": box,
+            "is_full_pass": True,
         })
         
     return lines
@@ -206,6 +220,22 @@ def bbox_iou(a: Dict[str, float], b: Dict[str, float]) -> float:
     b_area = max(0.0, (bx2 - bx1) * (by2 - by1))
     union = a_area + b_area - inter
     return inter / union if union > 0 else 0.0
+
+
+def bbox_ios(a: Dict[str, float], b: Dict[str, float]) -> float:
+    """Intersection over smaller box area (containment / fragment ratio)."""
+    ax1, ay1 = a["x"], a["y"]
+    ax2, ay2 = a["x"] + a["width"], a["y"] + a["height"]
+    bx1, by1 = b["x"], b["y"]
+    bx2, by2 = b["x"] + b["width"], b["y"] + b["height"]
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+    inter = iw * ih
+    a_area = max(1e-6, a["width"] * a["height"])
+    b_area = max(1e-6, b["width"] * b["height"])
+    smaller = min(a_area, b_area)
+    return inter / smaller if smaller > 0 else 0.0
 
 
 def enhance_contrast(image: np.ndarray) -> np.ndarray:
@@ -268,6 +298,7 @@ def run_overlapping_bands(
                          round((py * crop_h / h) + (y0 / h) * 100.0, 2)]
                         for px, py in l["polygon"]
                     ]
+                l["is_full_pass"] = False
                 l.pop("raw_box", None)
                 out.append(l)
     return out
@@ -341,31 +372,74 @@ def _vertical_overlap_ratio(a: Dict[str, float], b: Dict[str, float]) -> float:
 
 def dedupe_lines(
     merged: List[Dict[str, Any]],
-    iou_threshold: float = 0.6,
+    iou_threshold: float = 0.50,
+    ios_threshold: float = 0.60,
 ) -> List[Dict[str, Any]]:
     """
-    De-duplicate overlapping readings across passes, keeping the
-    higher-confidence text for any overlapping region.
+    De-duplicate overlapping readings across passes, preserving primary reads
+    and removing cropped/partial line fragments while retaining legitimate small text.
 
-    Two passes:
-    1. IoU-based: same physical region read multiple times.
-    2. Text-based: identical text re-read from adjacent band margins at the
-       same visual line (high vertical overlap, near-equal x) collapses into
-       one line, so the same title read by the whole-image pass and two band
-       crops doesn't inflate the line count.
+    Sort Order:
+    - Whole-image pass reads (is_full_pass=True) first
+    - Higher confidence score
+    - Larger bounding box area
 
-    Output is sorted top-to-bottom, left-to-right for stable downstream
-    extraction.
+    Deduplication rules:
+    1. IoU Overlap: Same physical region detected across passes (IoU > iou_threshold).
+    2. Containment / IoS: Substantial bounding box containment (IoS > ios_threshold).
+       If candidate 'l' is contained within an existing kept box 'k':
+       - Drop if 'k' is a whole-image read and 'l' is a band-crop fragment.
+       - Drop if candidate text is a substring or lower-confidence duplicate of 'k'.
+    3. Text/Line Match: Duplicate identical text on adjacent band boundaries.
     """
     for l in merged:
         l.pop("raw_box", None)
-    merged.sort(key=lambda x: x["confidence"], reverse=True)
+
+    # Sort key: full pass first, then confidence, then box area
+    merged.sort(
+        key=lambda x: (
+            1 if x.get("is_full_pass", True) else 0,
+            x["confidence"],
+            x["bbox"]["width"] * x["bbox"]["height"],
+            -x["bbox"]["y"],
+            -x["bbox"]["x"],
+        ),
+        reverse=True,
+    )
+
     kept: List[Dict[str, Any]] = []
     for l in merged:
-        duplicate = any(bbox_iou(l["bbox"], keep["bbox"]) > iou_threshold for keep in kept)
-        if not duplicate:
+        t = l.get("text", "")
+        b = l["bbox"]
+        is_full = l.get("is_full_pass", True)
+
+        is_dup = False
+        for k in kept:
+            kt = k.get("text", "")
+            kb = k["bbox"]
+            k_full = k.get("is_full_pass", True)
+
+            iou = bbox_iou(b, kb)
+            ios = bbox_ios(b, kb)
+
+            if iou > iou_threshold:
+                is_dup = True
+                break
+
+            if ios > ios_threshold:
+                # If existing kept line is from full-image pass and current line is a band slice fragment
+                if k_full and not is_full:
+                    is_dup = True
+                    break
+                # Substring containment or lower confidence fragment
+                if t in kt or kt in t or l["confidence"] <= k["confidence"]:
+                    is_dup = True
+                    break
+
+        if not is_dup:
             kept.append(l)
 
+    # Secondary pass: collapse duplicate identical text at same visual line across band margins
     text_deduped: List[Dict[str, Any]] = []
     for l in kept:
         dup_text = any(
@@ -376,6 +450,11 @@ def dedupe_lines(
         )
         if not dup_text:
             text_deduped.append(l)
+
+    # Clean up internal tag before returning
+    for l in text_deduped:
+        l.pop("is_full_pass", None)
+
     text_deduped.sort(key=lambda x: (x["bbox"]["y"], x["bbox"]["x"]))
     return text_deduped
 
@@ -383,25 +462,13 @@ def dedupe_lines(
 def ocr_image_with_recovery(
     image: np.ndarray,
     engine: RapidOCR,
-    min_lines: int = 24,
+    min_lines: int = 8,
 ) -> List[Dict[str, Any]]:
     """
-    OCR a package photo with every recovery strategy needed to read ALL
-    visible characters, not just the loudest ones:
-
+    OCR a package photo with recovery strategies.
     Pass 1: whole-image read.
-    Pass 2: overlapping horizontal band read (ALWAYS runs) — recovers small
-            statutory fine print that busy brand panels cause the whole-image
-            detector to skip. Never conditional, because a busy label can
-            return >= min_lines while still silently dropping its fine print.
-    Pass 3: CLAHE contrast-enhanced read — recovers washed-out text on bright
-            saturated artwork.
-    Pass 4: 90/180/270 rotation reads — recovers sideways/upside-down labels;
-            bboxes are remapped back to the original image space.
-
-    All passes are merged and de-duplicated by bounding-box IoU, keeping the
-    higher-confidence reading of any overlapping region. Passes 3-4 run only
-    when the earlier passes under-yield, bounding worst-case latency.
+    Pass 2: overlapping horizontal band read (ALWAYS runs).
+    Pass 3 & 4: contrast & rotation passes run only when earlier passes yield < min_lines (default 8).
     """
     merged: List[Dict[str, Any]] = list(run_paddle_ocr(image, engine))
     merged.extend(run_overlapping_bands(image, engine))
@@ -411,7 +478,32 @@ def ocr_image_with_recovery(
         for rot in (90, 180, 270):
             merged.extend(run_rotated_ocr(image, engine, rot))
 
-    return dedupe_lines(merged)
+    res = dedupe_lines(merged)
+
+    # ── Relative size annotation ────────────────────────────────────────────
+    # Compute median bbox height across all surviving lines, then annotate
+    # each line with relativeHeight = height / median and geometric centre.
+    # This gives downstream code a resolution-independent prominence signal
+    # (relativeHeight > 2.5 means "much taller than typical label text").
+    heights = [l["bbox"]["height"] for l in res if l["bbox"]["height"] > 0]
+    if heights:
+        heights_sorted = sorted(heights)
+        mid = len(heights_sorted) // 2
+        median_h = heights_sorted[mid] if len(heights_sorted) % 2 == 1 else (
+            (heights_sorted[mid - 1] + heights_sorted[mid]) / 2.0
+        )
+    else:
+        median_h = 1.0
+    for l in res:
+        h_val = l["bbox"]["height"]
+        l["relativeHeight"] = round(h_val / median_h, 3) if median_h > 0 else 1.0
+        l["centerX"] = round(l["bbox"]["x"] + l["bbox"]["width"] / 2, 2)
+        l["centerY"] = round(l["bbox"]["y"] + l["bbox"]["height"] / 2, 2)
+
+    import hashlib, json as _json
+    h = hashlib.sha256(_json.dumps([l["text"] for l in res], ensure_ascii=False).encode()).hexdigest()[:12]
+    print(f"[DETERM] OCR_RECOVERY count={len(res)} median_h={median_h:.2f} hash={h}", file=sys.stderr)
+    return res
 
 
 # ---------------------------------------------------------------------------
@@ -535,6 +627,7 @@ def extract_product_name(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
         if "BRITANNIA" in t and not any(k in t.lower() for k in ["industries", "ltd", "hungerford", "kolkata", "marketed"]):
             name_parts = ["Britannia"]
             matched_boxes = [l["bbox"]]
+            matched_confidences = [l["confidence"]]
             src_img = l.get("imageId", "img-1")
             for j in range(1, 3):
                 if i + j < len(all_lines):
@@ -545,12 +638,14 @@ def extract_product_name(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
                     if any(w in next_t.lower() for w in ["good day", "pista", "badam", "butter", "cashew", "biscuit", "cookie", "marie", "treat", "bourbon", "milk bikis", "50-50", "nutrichoice", "tiger", "little hearts", "nice", "pure magic"]):
                         name_parts.append(next_t)
                         matched_boxes.append(next_l["bbox"])
+                        matched_confidences.append(next_l["confidence"])
             full_name = " ".join(name_parts)
+            avg_conf = round(sum(matched_confidences) / len(matched_confidences), 3)
             return {
                 "field": "product_name",
                 "value": full_name,
                 "evidenceText": full_name,
-                "confidence": l["confidence"],
+                "confidence": avg_conf,
                 "bbox": union_bboxes(matched_boxes),
                 "polygon": l.get("polygon"),
                 "sourceImageId": src_img,
@@ -597,14 +692,21 @@ def extract_product_name(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
     candidates = []
     for l in all_lines:
         t = l["text"].strip()
-        if len(t) < 3 or re.match(r'^[\d\W_]+$', t):
+        # Do NOT filter on text length here — short names like "VIM", "ORS"
+        # or even "A1" are valid commodity names when visually prominent.
+        # Only reject lines that are purely digits/punctuation (no alpha at all),
+        # or match the statutory/noise pattern regex.
+        if re.match(r'^[\d\W_]+$', t):
             continue
         if noise_pattern.search(t):
             continue
         bbox = l["bbox"]
         area = (bbox["width"] * bbox["height"])
+        # Use relativeHeight for prominence weighting when available
+        rel_h = l.get("relativeHeight", 1.0)
         pos_weight = 1.6 if bbox["y"] < 65 else 0.8
-        score = area * (1.0 + l["confidence"]) * pos_weight
+        # Relative-height bonus: larger-than-median text scored higher
+        score = area * (1.0 + l["confidence"]) * pos_weight * max(1.0, rel_h * 0.5)
         candidates.append((score, l))
 
     if candidates:
@@ -612,6 +714,7 @@ def extract_product_name(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
         top_line = candidates[0][1]
         name_parts = [top_line["text"].strip()]
         matched_boxes = [top_line["bbox"]]
+        matched_confidences = [top_line["confidence"]]
         src_img = top_line.get("imageId", "img-1")
 
         for _, c_line in candidates[1:4]:
@@ -625,16 +728,18 @@ def extract_product_name(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
                 else:
                     name_parts.append(c_line["text"].strip())
                 matched_boxes.append(c_bbox)
+                matched_confidences.append(c_line["confidence"])
                 break
 
         full_title = " ".join(name_parts)
         full_title = re.sub(r'\s+', ' ', full_title).strip()
+        avg_conf = round(sum(matched_confidences) / len(matched_confidences), 3)
         if full_title:
             return {
                 "field": "product_name",
                 "value": full_title,
                 "evidenceText": full_title,
-                "confidence": top_line["confidence"],
+                "confidence": avg_conf,
                 "bbox": union_bboxes(matched_boxes),
                 "polygon": top_line.get("polygon"),
                 "sourceImageId": src_img,
@@ -745,49 +850,63 @@ def extract_net_quantity(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
         t = l["text"]
         m = re.search(r'(?:GET|EXTRA|\+)\s*(\d+(?:\.\d+)?)\s*(g|gm|kg|ml|l)\s*(?:EXTRA|FREE)?', t, re.IGNORECASE)
         if m:
-            extra_match = (float(m.group(1)), m.group(2).lower())
+            extra_unit = (m.group(2) or "g").lower()
+            extra_match = (float(m.group(1)), extra_unit)
             extra_line = l
             break
 
-    nq_regex = re.compile(r'(?:NET\s*(?:QTY|QUANTITY|WT|WEIGHT|CONTENTS?)|NET)\s*[:.\-]?\s*(\d+(?:\.\d+)?)\s*(kg|g|gm|gms|grams?|ml|l|ltr|ltrs|oz|lb|pcs?|nos?|units?)\b', re.IGNORECASE)
+    nq_regex = re.compile(r'(?:NET\s*(?:QTY|QUANTITY|WT|WEIGHT|CONTENTS?))\s*[:.\-]?\s*(\d+(?:\.\d+)?)\s*(kg|g|gm|gms|grams?|ml|l|ltr|ltrs|oz|lb|pcs?|nos?|units?)?\b', re.IGNORECASE)
+    nq_fallback_regex = re.compile(r'\bNET\s*[:.\-]?\s*(\d+(?:\.\d+)?)\s*(kg|g|gm|gms|grams?|ml|l|ltr|ltrs|oz|lb|pcs?|nos?|units?)\b', re.IGNORECASE)
     
-    for l in all_lines:
-        t = l["text"]
-        m = nq_regex.search(t)
-        if m:
-            num = float(m.group(1))
-            unit = m.group(2).lower()
-            if unit in ["g", "gm", "gms", "grams"]:
-                unit = "g"
-            elif unit in ["kg", "kgs"]:
-                unit = "kg"
-            elif unit in ["ml"]:
-                unit = "ml"
-            elif unit in ["l", "ltr", "ltrs", "litres", "liters"]:
-                unit = "l"
-                
-            val_str = f"{int(num) if num.is_integer() else num} {unit}"
-            if extra_match and unit == extra_match[1]:
-                total = num + extra_match[0]
-                tot_str = f"{int(total) if total.is_integer() else total}"
-                num_str = f"{int(num) if num.is_integer() else num}"
-                extra_str = f"{int(extra_match[0]) if extra_match[0].is_integer() else extra_match[0]}"
-                val_str = f"{tot_str} {unit} ({num_str} {unit} + {extra_str} {unit} EXTRA)"
-                
-            return {
-                "field": "net_quantity",
-                "value": val_str,
-                "evidenceText": t,
-                "confidence": l["confidence"],
-                "bbox": l["bbox"],
-                "polygon": l.get("polygon"),
-                "sourceImageId": l.get("imageId", "img-1"),
-            }
+    for i, l in enumerate(all_lines):
+        t_orig = l["text"]
+        
+        # Build candidate texts: single line, 2-line join, 3-line join
+        cand_items = [(t_orig, [l])]
+        if i + 1 < len(all_lines):
+            cand_items.append((f"{t_orig} {all_lines[i+1]['text']}", [l, all_lines[i+1]]))
+        if i + 2 < len(all_lines):
+            cand_items.append((f"{t_orig} {all_lines[i+1]['text']} {all_lines[i+2]['text']}", [l, all_lines[i+1], all_lines[i+2]]))
 
+        for t, lines_used in cand_items:
+            m = nq_regex.search(t)
+            if m:
+                num = float(m.group(1))
+                unit = (m.group(2) or "g").lower()
+                if unit in ["g", "gm", "gms", "grams"]:
+                    unit = "g"
+                elif unit in ["kg", "kgs"]:
+                    unit = "kg"
+                elif unit in ["ml"]:
+                    unit = "ml"
+                elif unit in ["l", "ltr", "ltrs", "litres", "liters"]:
+                    unit = "l"
+                    
+                val_str = f"{int(num) if num.is_integer() else num} {unit}"
+                if extra_match and unit == extra_match[1]:
+                    total = num + extra_match[0]
+                    tot_str = f"{int(total) if total.is_integer() else total}"
+                    num_str = f"{int(num) if num.is_integer() else num}"
+                    extra_str = f"{int(extra_match[0]) if extra_match[0].is_integer() else extra_match[0]}"
+                    val_str = f"{tot_str} {unit} ({num_str} {unit} + {extra_str} {unit} EXTRA)"
+                    
+                avg_conf = round(sum(item["confidence"] for item in lines_used) / len(lines_used), 3)
+                combined_box = union_bboxes([item["bbox"] for item in lines_used])
+                return {
+                    "field": "net_quantity",
+                    "value": val_str,
+                    "evidenceText": t,
+                    "confidence": avg_conf,
+                    "bbox": combined_box,
+                    "polygon": lines_used[0].get("polygon"),
+                    "sourceImageId": lines_used[0].get("imageId", "img-1"),
+                }
+
+    marketing_re = re.compile(r'\b(?:minute|min|ready|protein|fat|fibre|fiber|energy|calorie|serving|per\s+\d|vitamin|calcium|iron|sodium|carb|sugar|cholesterol)\b', re.IGNORECASE)
     standalone_regex = re.compile(r'\b(\d+(?:\.\d+)?)\s*(g|gm|kg|ml|l)\b', re.IGNORECASE)
     for l in all_lines:
         t = l["text"]
-        if "/" in t:
+        if "/" in t or marketing_re.search(t):
             continue
         m = standalone_regex.search(t)
         if m:
@@ -833,39 +952,51 @@ def extract_net_quantity(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
 
 def extract_date(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Extract Mfg / Packing Date / Best Before Date."""
-    date_3part = re.compile(r'\b(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})\b')
-    date_2part = re.compile(r'\b(0[1-9]|1[0-2])[\/\-](20\d{2}|\d{2})\b|\b(?:mfd|mfg|pkd|packed|exp|expiry|use\s*by|best\s*before)\s*[:.\-]?\s*([0-9]{1,2}[\/\-][0-9]{2,4})\b', re.IGNORECASE)
+    date_3part = re.compile(r'\b(\d{1,2}\s*[\/\-.]\s*\d{1,2}\s*[\/\-.]\s*\d{2,4})\b')
+    date_2part = re.compile(r'\b(0[1-9]|1[0-2])\s*[\/\-.]\s*(20\d{2}|\d{2})\b|\b(?:mfd|mfg|pkd|packed|exp|expiry|use\s*by|best\s*before)\s*(?:date)?\s*[:.\-]?\s*([0-9]{1,2}\s*[\/\-.]\s*[0-9]{2,4})\b', re.IGNORECASE)
     
     dates_found = []
     
-    for l in all_lines:
-        t = l["text"]
+    for i, l in enumerate(all_lines):
+        t_orig = l["text"]
         # Skip prices and weights
-        if re.search(r'mrp|rs\.?|₹|inr|price|/\s*(?:g|gm|kg|ml|l)\b', t, re.IGNORECASE):
+        if re.search(r'mrp|rs\.?|₹|inr|price|/\s*(?:g|gm|kg|ml|l)\b', t_orig, re.IGNORECASE):
             continue
             
-        has_kw = bool(re.search(r'mfd|mfg|pkd|packed|exp|expiry|use\s*by|best\s*before|date', t, re.IGNORECASE))
-        
-        m3 = date_3part.findall(t)
-        for d in m3:
-            # Skip if delimiter is dot and first part > 31 (e.g. price like 35.00)
-            if "." in d:
-                parts = d.split(".")
-                if len(parts) >= 2 and (float(parts[0]) > 31 or float(parts[1]) > 12):
-                    continue
-            dates_found.append({"date": d, "hasKw": has_kw, "line": l})
+        cand_items = [(t_orig, [l])]
+        if i + 1 < len(all_lines) and all_lines[i+1].get("imageId") == l.get("imageId"):
+            cand_items.append((f"{t_orig} {all_lines[i+1]['text']}", [l, all_lines[i+1]]))
+
+        for t, lines_used in cand_items:
+            has_kw = bool(re.search(r'mfd|mfg|pkd|packed|exp|expiry|use\s*by|best\s*before|date', t, re.IGNORECASE))
             
-        m2 = date_2part.findall(t)
-        for m in m2:
-            d = m[0] or m[2] or (f"{m[0]}/{m[1]}" if m[0] and m[1] else "")
-            if d:
-                dates_found.append({"date": d, "hasKw": has_kw, "line": l})
+            m3 = date_3part.findall(t)
+            for d in m3:
+                # Skip if delimiter is dot and first part > 31 (e.g. price like 35.00)
+                if "." in d:
+                    parts = d.split(".")
+                    if len(parts) >= 2 and (float(parts[0]) > 31 or float(parts[1]) > 12):
+                        continue
+                dates_found.append({"date": d, "hasKw": has_kw, "line": lines_used[0]})
+                
+            m2 = date_2part.findall(t)
+            for m in m2:
+                d = f"{m[0]}/{m[1]}" if (m[0] and m[1]) else (m[2] or m[0])
+                if d:
+                    dates_found.append({"date": d, "hasKw": has_kw, "line": lines_used[0]})
             
     if not dates_found:
         return None
         
     keyword_dates = [d for d in dates_found if d["hasKw"]]
-    effective_dates = keyword_dates if keyword_dates else dates_found
+    candidates_to_use = keyword_dates if keyword_dates else dates_found
+    unique_dates = []
+    seen = set()
+    for item in candidates_to_use:
+        if item["date"] not in seen:
+            seen.add(item["date"])
+            unique_dates.append(item)
+    effective_dates = unique_dates
             
     if len(effective_dates) >= 2:
         primary = effective_dates[0]
@@ -914,10 +1045,15 @@ def extract_manufacturer(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
     for i, l in enumerate(all_lines):
         t = l["text"]
         t_low = t.lower()
+        # Skip price, weight, date lines when searching for manufacturer
+        if re.search(r'^\s*(?:mrp|m\.r\.p|rsp|rs\.?|₹|net\s*(?:wt|qty|weight|vol)|mfg|mfd|pkd|packed|exp|expiry)\b', t_low):
+            continue
+
         is_mfr = any(k in t_low for k in mfr_keywords) or (bool(corp_pattern.search(t)) and len(t.split()) >= 2)
         if is_mfr:
             parts = [t]
             matched_boxes = [l["bbox"]]
+            matched_confidences = [l["confidence"]]
             src_img = l.get("imageId", "img-1")
             
             for j in range(1, 4):
@@ -930,9 +1066,11 @@ def extract_manufacturer(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
                         break
                     parts.append(next_t)
                     matched_boxes.append(next_l["bbox"])
+                    matched_confidences.append(next_l["confidence"])
                     
             full_val = " ".join(parts)
             combined_bbox = union_bboxes(matched_boxes)
+            avg_conf = round(sum(matched_confidences) / len(matched_confidences), 3)
 
             # Credibility gate: only emit a manufacturer declaration when the
             # assembled text carries BOTH a location signal (PIN/state) AND an
@@ -964,7 +1102,7 @@ def extract_manufacturer(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
                 "field": "manufacturer",
                 "value": full_val,
                 "evidenceText": full_val,
-                "confidence": l["confidence"],
+                "confidence": avg_conf,
                 "bbox": combined_bbox,
                 "polygon": l.get("polygon"),
                 "sourceImageId": src_img,
@@ -978,7 +1116,7 @@ def extract_consumer_care(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str,
     phone = None
     email = None
     address = None
-    evidence_line = None
+    evidence_lines = []
     
     for l in all_lines:
         t = l["text"]
@@ -992,20 +1130,20 @@ def extract_consumer_care(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str,
                     phone = "1800-3000-4530"
                 else:
                     phone = p_match.group(0)
-                evidence_line = l
+                evidence_lines.append(l)
 
         if not email:
             e_match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', t)
             if e_match:
                 email = e_match.group(0)
-                if not evidence_line:
-                    evidence_line = l
+                if l not in evidence_lines:
+                    evidence_lines.append(l)
 
         if not address:
             if re.search(r'bangalore[\s\-]560048|karnataka|prestige\s*shantiniketan|hungerford', t, re.IGNORECASE):
                 address = t
-                if not evidence_line:
-                    evidence_line = l
+                if l not in evidence_lines:
+                    evidence_lines.append(l)
 
     # Only a verifiable contact (phone or email) constitutes a usable
     # consumer-care declaration. A bare address line with no contact is
@@ -1019,12 +1157,15 @@ def extract_consumer_care(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str,
             summary_parts.append(f"Email: {email}")
         if address:
             summary_parts.append(f"Address: {address}")
+
+        evidence_line = evidence_lines[0] if evidence_lines else None
+        avg_conf = round(sum(l["confidence"] for l in evidence_lines) / len(evidence_lines), 3) if evidence_lines else None
             
         return {
             "field": "consumer_care",
             "value": " | ".join(summary_parts),
             "evidenceText": evidence_line["text"] if evidence_line else "Consumer Care Cell",
-            "confidence": evidence_line["confidence"] if evidence_line else 0.90,
+            "confidence": avg_conf,
             "bbox": evidence_line["bbox"] if evidence_line else {"x": 10, "y": 70, "width": 80, "height": 10},
             "polygon": evidence_line.get("polygon") if evidence_line else None,
             "sourceImageId": evidence_line.get("imageId", "img-1") if evidence_line else "img-1",
@@ -1140,14 +1281,51 @@ def extract_batch_number(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
     return None
 
 
+_STATUTORY_SIGNALS = re.compile(
+    r'\b(?:net\s*(?:wt|qty|weight|quantity|contents?)|'
+    r'mrp|m\.r\.p|maximum\s*retail\s*price|'
+    r'mfd|mfg|pkd|manufactured|packing|packed|expiry|'
+    r'consumer\s*care|customer\s*care|helpline|toll\s*free|'
+    r'manufactured\s*by|marketed\s*by|packed\s*by|mfd\s*by|'
+    r'country\s*of\s*origin|made\s*in|lic\s*no|fssai|regn|'
+    r'best\s*before|use\s*by|batch|lot\s*no)\b',
+    re.IGNORECASE,
+)
+
+
+def classify_panel(all_lines: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Classify whether the image appears to show the front/marketing panel only.
+
+    Returns a dict with:
+      ``signal_count``  — number of lines containing a statutory keyword
+      ``is_pure_front`` — True only when signal_count==0 AND len(lines)<10
+                          (hard suppress path: genuinely no statutory text)
+      ``is_sparse``     — True when signal_count<2 AND len(lines)<20
+                          (advisory path: extraction runs but results are
+                           annotated with frontPanelAdvisory=True)
+    """
+    n = len(all_lines)
+    signal_count = sum(
+        1 for l in all_lines if _STATUTORY_SIGNALS.search(l.get("text", ""))
+    )
+    return {
+        "signal_count": signal_count,
+        "line_count": n,
+        "is_pure_front": (signal_count == 0 and n < 10),
+        "is_sparse": (signal_count < 2 and n < 20),
+    }
+
+
 def process_images(image_paths: List[str]) -> Dict[str, Any]:
     """
     Execute full pipeline across all provided images:
     1. Orientation correction + Preprocessing
     2. Package ROI detection
     3. PaddleOCR PP-OCRv4 text line extraction
-    4. Deterministic Statutory Field Extraction
-    5. Assembly of structured result with visual evidence
+    4. Panel classification (advisory front-panel signal, no hard suppression)
+    5. Deterministic Statutory Field Extraction
+    6. Assembly of structured result with visual evidence
     """
     engine = get_ocr_engine()
     
@@ -1175,21 +1353,46 @@ def process_images(image_paths: List[str]) -> Dict[str, Any]:
         # 3. PaddleOCR extraction (multi-pass recovery for fine print)
         lines = ocr_image_with_recovery(prep_img, engine)
         
-        # Tag each line with imageId
+        # Tag each line with imageId and accumulate for field extraction (full set).
         for l in lines:
             l["imageId"] = img_id
             all_extracted_lines.append(l)
-            
-        detections = []
+
+        # Build display detections — a confidence-filtered subset for UI rendering.
+        #
+        # Key invariant: all_extracted_lines always receives EVERY OCR line so
+        # field extraction sees maximum recall. display_detections is intentionally
+        # smaller: it only shows boxes the UI should draw over the image.
+        #
+        # A box is included in display_detections when:
+        #   • confidence >= 0.40  — suppresses random-noise hallucinations whose
+        #     OCR score is 0.20–0.39 (kept for extraction, not for display).
+        #   • bbox width & height >= 0.3 % of image — excludes genuinely
+        #     degenerate single-pixel or hairline blobs.  Note: 0.3 % of a
+        #     1000×1000 image = 3 px side, so a real 8pt printed character
+        #     (~7×10 px) always passes this gate.
+        _DISPLAY_CONF_FLOOR = 0.40
+        _DISPLAY_MIN_DIM_PCT = 0.3  # percent of image dimension
+        display_detections = []
         for l in lines:
-            detections.append({
+            b = l["bbox"]
+            if l["confidence"] < _DISPLAY_CONF_FLOOR:
+                continue
+            if b["width"] < _DISPLAY_MIN_DIM_PCT or b["height"] < _DISPLAY_MIN_DIM_PCT:
+                continue
+            display_detections.append({
                 "className": "text_region",
                 "text": l["text"],
                 "confidence": l["confidence"],
-                "bbox": l["bbox"],
+                "bbox": b,
                 "polygon": l["polygon"],
+                # Propagate relative prominence metadata so TS field-extraction
+                # can use resolution-independent size signals.
+                "relativeHeight": l.get("relativeHeight", 1.0),
+                "centerX": l.get("centerX"),
+                "centerY": l.get("centerY"),
             })
-            
+
         processed_images_data.append({
             "id": img_id,
             "width": w,
@@ -1197,12 +1400,45 @@ def process_images(image_paths: List[str]) -> Dict[str, Any]:
             "packageDetected": pkg_gate["detected"],
             "packageConfidence": pkg_gate["confidence"],
             "packageBbox": pkg_gate["bbox"],
-            "detections": detections,
+            "detections": display_detections,
         })
 
-    # 4. Deterministic Statutory Field Extraction
+    # 4. Panel classification (Fix 6 — advisory, precision-preserving)
+    #
+    #   is_pure_front == True  → genuinely no statutory text visible (signal_count=0
+    #                              AND <10 lines). Only product_name extraction runs;
+    #                              all other fields emit NOT_DETECTED with a prompt
+    #                              to flip the package. Recall is preserved because
+    #                              the product_name extractor still fires.
+    #
+    #   is_sparse == True      → statutory text is sparse but may be partially
+    #                              visible. ALL extractors run normally; any DETECTED
+    #                              declaration is annotated with frontPanelAdvisory=True
+    #                              so the UI/rules-engine can flag it for review.
+    #
+    #   Neither                → normal full-extraction path (no annotation).
+    panel = classify_panel(all_extracted_lines)
+    is_pure_front = panel["is_pure_front"]
+    is_sparse = panel["is_sparse"]
+    if is_pure_front:
+        import sys as _sys
+        print(
+            f"[DETERM] PURE_FRONT_PANEL: signal_count={panel['signal_count']}, "
+            f"lines={panel['line_count']} — only product_name extraction will run.",
+            file=_sys.stderr,
+        )
+    elif is_sparse:
+        import sys as _sys
+        print(
+            f"[DETERM] SPARSE_PANEL: signal_count={panel['signal_count']}, "
+            f"lines={panel['line_count']} — full extraction with advisory flag.",
+            file=_sys.stderr,
+        )
+
+    # 5. Deterministic Statutory Field Extraction
     declarations = []
-    
+    _PURE_FRONT_ALLOWED = {"product_name"}
+
     extractors = [
         ("product_name", extract_product_name),
         ("manufacturer", extract_manufacturer),
@@ -1216,43 +1452,157 @@ def process_images(image_paths: List[str]) -> Dict[str, Any]:
         ("best_before", extract_best_before),
         ("batch_number", extract_batch_number),
     ]
-    
+
     for field_name, extractor in extractors:
-        res = extractor(all_extracted_lines)
-        if res and res.get("value"):
-            decl = {
+        # Pure-front gate: suppress everything except product_name.
+        # This only fires when there are ZERO statutory signals and <10 lines —
+        # a genuinely blank/marketing-face frame.
+        if is_pure_front and field_name not in _PURE_FRONT_ALLOWED:
+            declarations.append({
                 "field": field_name,
-                "value": res["value"],
-                "rawValue": res.get("evidenceText", res["value"]),
-                "status": "DETECTED",
-                "confidence": res.get("confidence", 0.90),
-                "sourceImageId": res.get("sourceImageId", processed_images_data[0]["id"] if processed_images_data else "img-1"),
-                "bbox": res.get("bbox", {"x": 10, "y": 10, "width": 80, "height": 10}),
-                "polygon": res.get("polygon"),
-                "evidence": {
-                    "rawText": res.get("evidenceText", res["value"]),
-                    "boundingBox": res.get("bbox"),
-                    "polygon": res.get("polygon"),
-                }
-            }
-            if "consumerCareDetails" in res:
-                decl["consumerCareDetails"] = res["consumerCareDetails"]
-            declarations.append(decl)
-        else:
+                "value": None,
+                "status": "NOT_DETECTED",
+                "confidence": None,
+                "notDetectedReason": "Front panel only — flip to back/side panel to read statutory declarations.",
+            })
+            continue
+
+        matches = []
+        # Group lines by image to get at most 1 primary candidate per image
+        lines_by_img: Dict[str, List[Dict[str, Any]]] = {}
+        for l in all_extracted_lines:
+            img_id = l.get("imageId", "img-1")
+            lines_by_img.setdefault(img_id, []).append(l)
+
+        for img_id, img_lines in lines_by_img.items():
+            res = extractor(img_lines)
+            if res and res.get("value"):
+                matches.append(res)
+
+        if not matches:
             declarations.append({
                 "field": field_name,
                 "value": None,
                 "status": "NOT_DETECTED",
                 "confidence": None,
             })
+            continue
+
+        # Group candidates by normalized value to detect agreement vs conflict
+        grouped = {}
+        for m in matches:
+            v_norm = re.sub(r'\s+', ' ', m["value"].strip()).upper()
+            if v_norm not in grouped:
+                grouped[v_norm] = []
+            grouped[v_norm].append(m)
+
+        distinct_keys = list(grouped.keys())
+        source_image_ids = list(dict.fromkeys(m.get("sourceImageId", "img-1") for m in matches))
+
+        # Filter out keys that are proper substrings of longer candidate keys (e.g. 'PARLE-G' vs 'PARLE-G BISCUITS')
+        filtered_keys = [
+            k for k in distinct_keys
+            if not any(k != other and (k in other or (len(k) >= 4 and other in k)) for other in distinct_keys)
+        ]
+        if not filtered_keys:
+            filtered_keys = distinct_keys
+
+        primary_match = max(matches, key=lambda x: x.get("confidence", 0))
+
+        cand_list = [
+            {
+                "value": m["value"],
+                "sourceImageId": m.get("sourceImageId", "img-1"),
+                "rawValue": m.get("evidenceText", m["value"]),
+                "bbox": m.get("bbox"),
+                "polygon": m.get("polygon"),
+            }
+            for m in matches
+        ]
+
+        if len(filtered_keys) == 1:
+            target_key = filtered_keys[0]
+            best_in_group = max(grouped[target_key], key=lambda x: x.get("confidence", 0))
+            decl = {
+                "field": field_name,
+                "value": best_in_group["value"],
+                "rawValue": best_in_group.get("evidenceText", best_in_group["value"]),
+                "status": "DETECTED",
+                "confidence": best_in_group.get("confidence"),
+                "sourceImageId": best_in_group.get("sourceImageId", source_image_ids[0]),
+                "sourceImageIds": source_image_ids,
+                "bbox": best_in_group.get("bbox", {"x": 10, "y": 10, "width": 80, "height": 10}),
+                "polygon": best_in_group.get("polygon"),
+                "candidates": cand_list,
+                "evidence": {
+                    "rawText": best_in_group.get("evidenceText", best_in_group["value"]),
+                    "boundingBox": best_in_group.get("bbox"),
+                    "polygon": best_in_group.get("polygon"),
+                }
+            }
+            # Fix 6 (advisory): sparse panel flag — downstream can prompt review
+            if is_sparse and field_name not in {"product_name"}:
+                decl["frontPanelAdvisory"] = True
+            if "consumerCareDetails" in primary_match:
+                decl["consumerCareDetails"] = primary_match["consumerCareDetails"]
+            declarations.append(decl)
+        else:
+            distinct_values = [grouped[k][0]["value"] for k in distinct_keys]
+            conflict_val = "CONFLICT: " + " vs ".join(distinct_values)
+            decl = {
+                "field": field_name,
+                "value": conflict_val,
+                "rawValue": " | ".join(m.get("evidenceText", m["value"]) for m in matches),
+                "status": "CONFLICT",
+                "conflict": True,
+                "confidence": primary_match.get("confidence"),
+                "sourceImageId": primary_match.get("sourceImageId", source_image_ids[0]),
+                "sourceImageIds": source_image_ids,
+                "bbox": primary_match.get("bbox"),
+                "polygon": primary_match.get("polygon"),
+                "candidates": cand_list,
+                "evidence": {
+                    "rawText": conflict_val,
+                    "boundingBox": primary_match.get("bbox"),
+                    "polygon": primary_match.get("polygon"),
+                }
+            }
+            if is_sparse and field_name not in {"product_name"}:
+                decl["frontPanelAdvisory"] = True
+            declarations.append(decl)
 
     raw_ocr_full = "\n".join([f"[{l.get('imageId', '')}] {l['text']}" for l in all_extracted_lines])
-    
+
+    # ocrLines: full raw OCR evidence with geometry metadata.
+    # This is the complete evidence layer — every text token detected.
+    # Field extraction / rule engine operate on this; nothing is dropped here.
+    ocr_lines_out = [
+        {
+            "text": l["text"],
+            "confidence": round(float(l["confidence"]), 3),
+            "bbox": l["bbox"],
+            "polygon": l.get("polygon"),
+            "imageId": l.get("imageId", ""),
+            "relativeHeight": l.get("relativeHeight", 1.0),
+            "centerX": l.get("centerX"),
+            "centerY": l.get("centerY"),
+        }
+        for l in all_extracted_lines
+    ]
+
     return {
         "images": processed_images_data,
         "declarations": declarations,
         "rawOcrText": raw_ocr_full,
         "totalLinesExtracted": len(all_extracted_lines),
+        "ocrLines": ocr_lines_out,
+        # Fix 6: advisory panel classification so UI can prompt "flip the package"
+        "panelClassification": {
+            "signalCount": panel["signal_count"],
+            "lineCount": panel["line_count"],
+            "isPureFront": panel["is_pure_front"],
+            "isSparse": panel["is_sparse"],
+        },
     }
 
 

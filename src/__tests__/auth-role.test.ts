@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { POST as postLogin } from "@/app/api/auth/login/route";
 import { GET as getSession } from "@/app/api/auth/session/route";
@@ -50,6 +50,13 @@ describe("PBKDF2 Password Hashing & HMAC Session Token Security", () => {
 });
 
 describe("Credentialed Authentication Endpoints (Dual Portal)", () => {
+  beforeAll(() => {
+    process.env.TEST_MODE = "true";
+  });
+  afterAll(() => {
+    delete process.env.TEST_MODE;
+  });
+
   it("POST /api/auth/login succeeds with valid officer credentials and sets HttpOnly cookie", async () => {
     const request = new NextRequest("http://localhost:3000/api/auth/login", {
       method: "POST",

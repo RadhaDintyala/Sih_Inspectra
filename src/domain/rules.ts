@@ -309,16 +309,24 @@ function validateConsumerCare(value: string): { ok: boolean; reason?: string } {
   return { ok: true };
 }
 
-/** Country of origin: for imported products must be declared. */
-function validateCountryOfOrigin(value: string | null | undefined): { ok: boolean; reason?: string } {
-  if (!value || !value.trim()) {
-    return { ok: false, reason: "Country of origin not declared. Required for imported goods; if domestically manufactured this may be inferred from manufacturer address, but a clear declaration is preferable." };
+/** Country of origin: for imported products must be declared; for domestic goods inferred from manufacturer address. */
+function validateCountryOfOrigin(value: string | null | undefined, declarations?: Declaration[]): { ok: boolean; reason?: string } {
+  if (value && value.trim()) {
+    const known = normalizeCountryOfOrigin(value);
+    if (known) return { ok: true };
   }
-  const known = normalizeCountryOfOrigin(value);
-  if (!known) {
-    return { ok: false, reason: `Country of origin declaration "${value}" is not a recognizable country.` };
+
+  // Domestic manufacture in India inferred from manufacturer address
+  const mfr = declarations?.find((d) => d.field === "manufacturer");
+  if (mfr && mfr.value && (mfr.status === "DETECTED" || mfr.status === "VERIFIED")) {
+    const mfrVal = mfr.value.toLowerCase();
+    const isIndianMfr = /\b(?:india|kolkata|mumbai|delhi|new\s*delhi|chennai|hyderabad|bengaluru|bangalore|pune|ahmedabad|gurgaon|noida|karnataka|maharashtra|tamil\s*nadu|kerala|andhra|telangana|gujarat|rajasthan|punjab|uttar\s*pradesh|bihar|odisha|west\s*bengal|assam|goa)\b/.test(mfrVal);
+    if (isIndianMfr) {
+      return { ok: true, reason: "Domestically manufactured in India (established from Indian manufacturer address under Rule 6(1)(a))." };
+    }
   }
-  return { ok: true };
+
+  return { ok: false, reason: "Country of origin not declared. Required for imported goods; for domestic goods inferred from manufacturer address." };
 }
 
 /** Unit sale price must be ₹ per standard unit. */
@@ -992,7 +1000,7 @@ function evaluateSingleRule(
       validation = validateConsumerCare(value);
       break;
     case "country_of_origin":
-      validation = validateCountryOfOrigin(declaration?.value ?? value);
+      validation = validateCountryOfOrigin(declaration?.value ?? value, declarations);
       break;
     case "unit_sale_price":
       validation = validateUnitSalePrice(value);

@@ -114,6 +114,17 @@ export function ScanView({
   const liveOffscreenRef = useRef<HTMLCanvasElement | null>(null);
   const liveDisplayRef = useRef<HTMLDivElement>(null);
 
+  // Tier 0 Classical CV Frame Diagnostics State (100% Client-Side, 0ms latency)
+  // Must be declared before the useEffect that references it.
+  const [tier0Result, setTier0Result] = useState<FrameAnalysisResult | null>(null);
+
+  // Server-side package-presence confirmation (same gate as the pipeline).
+  // Must be declared before the useEffect at ~line 200 that references it.
+  const [serverGate, setServerGate] = useState<{
+    state: "LOOKING" | "PACKAGE_NOT_DETECTED" | "PACKAGE_DETECTED" | "CAPTURE_READY" | "QUALITY_INSUFFICIENT";
+    tip: string;
+  } | null>(null);
+
   // Live detection effect
   useEffect(() => {
     if (!liveDetectEnabled || !liveEngineRef.current) return;
@@ -281,15 +292,11 @@ export function ScanView({
   const rotationRef = useRef(rotation);
   rotationRef.current = rotation;
 
-  // Tier 0 Classical CV Frame Diagnostics State (100% Client-Side, 0ms latency)
-  const [tier0Result, setTier0Result] = useState<FrameAnalysisResult | null>(null);
+  // tier0Result is declared earlier in the component (see above) to avoid
+  // the temporal dead zone in the useEffect that feeds it to the live engine.
 
-  // Server-side package-presence confirmation (same gate as the pipeline).
-  // READY is shown only after the backend confirms a package in-frame.
-  const [serverGate, setServerGate] = useState<{
-    state: "LOOKING" | "PACKAGE_NOT_DETECTED" | "PACKAGE_DETECTED" | "CAPTURE_READY" | "QUALITY_INSUFFICIENT";
-    tip: string;
-  } | null>(null);
+  // serverGate is declared earlier in the component (see above) to avoid
+  // the temporal dead zone in the useEffect that feeds it to the live engine.
   const gateInFlightRef = useRef(false);
   const gateCheck = async () => {
     const video = videoRef.current;

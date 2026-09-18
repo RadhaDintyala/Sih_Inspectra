@@ -140,13 +140,38 @@ export function matchAnchor(
       return { anchor, distance: 0, position: confPos };
     }
 
-    // Fuzzy: scan sliding windows of the text with variable lengths
     const anchorLen = aNorm.length;
-    // Cap max distance for short anchors (e.g. max 1 edit for 3-letter anchors like MRP)
-    const effectiveMaxDist = Math.min(maxDistance, Math.max(0, Math.floor(anchorLen / 2)));
 
-    for (let i = 0; i <= normalizedLower.length - Math.max(2, anchorLen - effectiveMaxDist); i++) {
-      for (let wLen = Math.max(2, anchorLen - effectiveMaxDist); wLen <= Math.min(anchorLen + effectiveMaxDist, normalizedLower.length - i); wLen++) {
+    // For 3-letter anchors ("mfd", "mfg", "exp", "mrp"), check word tokens
+    if (anchorLen <= 3) {
+      const words = text.split(/[\s:.\-\/\\]+/);
+      let curPos = 0;
+      for (const w of words) {
+        if (w.length >= 2 && w.length <= 5) {
+          const wNorm = normalizeConfusables(w);
+          const dist = levenshtein(aNorm, wNorm);
+          // Allow edit distance 1 for 3-letter anchors, excluding mrp<->mfr and mfg<->mfr swaps
+          const isConfusableSwap =
+            (aNorm === "mfr" && (wNorm === "mrp" || wNorm === "mfg")) ||
+            (aNorm === "mrp" && wNorm === "mfr") ||
+            (aNorm === "mfg" && wNorm === "mfr");
+
+          if (dist <= 1 && !isConfusableSwap) {
+            const p = lower.indexOf(w.toLowerCase(), curPos);
+            if (!best || dist < best.distance) {
+              best = { anchor, distance: dist, position: p >= 0 ? p : curPos };
+            }
+          }
+        }
+        curPos += w.length + 1;
+      }
+      continue;
+    }
+
+    const effectiveMaxDist = Math.min(maxDistance, Math.max(0, Math.floor(anchorLen / 3)));
+
+    for (let i = 0; i <= normalizedLower.length - Math.max(3, anchorLen - effectiveMaxDist); i++) {
+      for (let wLen = Math.max(3, anchorLen - effectiveMaxDist); wLen <= Math.min(anchorLen + effectiveMaxDist, normalizedLower.length - i); wLen++) {
         const window = normalizedLower.slice(i, i + wLen);
         const dist = levenshtein(aNorm, window);
         if (dist <= effectiveMaxDist) {

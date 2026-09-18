@@ -26,10 +26,12 @@ import {
 import { logAuditEvent } from "@/services/audit";
 import type { PipelineInputImage } from "@/services/pipeline-worker";
 
+import { randomBytes } from "crypto";
+
 function generateId(): string {
   const year = new Date().getFullYear();
-  const seq = Math.floor(1000 + Math.random() * 9000);
-  return `INSP-${year}-${seq}`;
+  const hex = randomBytes(4).toString("hex").toUpperCase();
+  return `INSP-${year}-${hex}`;
 }
 
 function hasValidImageSignature(buffer: Buffer): boolean {

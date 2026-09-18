@@ -316,7 +316,7 @@ export const LEGAL_RULE_REGISTRY: LegalRule[] = [
     version: "2011.1",
     evidenceRequirement: "Consumer care cell/office declaration with address.",
     status: "active",
-    engineEnabled: true,
+    engineEnabled: false,
   },
 {
     ruleId: "LM-PC-07",
@@ -398,7 +398,7 @@ export const LEGAL_RULE_REGISTRY: LegalRule[] = [
     version: "2011.1",
     evidenceRequirement: "Name and address with PIN code or address structure.",
     status: "active",
-    engineEnabled: true,
+    engineEnabled: false,
   },
   {
     ruleId: "LM-PC-11",
@@ -414,7 +414,7 @@ export const LEGAL_RULE_REGISTRY: LegalRule[] = [
     version: "2011.1",
     evidenceRequirement: "Quantity declaration in standard SI units.",
     status: "active",
-    engineEnabled: true,
+    engineEnabled: false,
   },
   {
     ruleId: "LM-PC-12",
@@ -430,7 +430,7 @@ export const LEGAL_RULE_REGISTRY: LegalRule[] = [
     version: "2011.1",
     evidenceRequirement: "Declared quantity in required format, unit, and exact value.",
     status: "active",
-    engineEnabled: true,
+    engineEnabled: false,
   },
   {
     ruleId: "LM-PC-13",
@@ -446,7 +446,7 @@ export const LEGAL_RULE_REGISTRY: LegalRule[] = [
     version: "2011.1",
     evidenceRequirement: "Assess that declared unit is SI/metric.",
     status: "active",
-    engineEnabled: true,
+    engineEnabled: false,
   },
   {
     ruleId: "LM-PC-14",
@@ -513,7 +513,7 @@ export const LEGAL_RULE_REGISTRY: LegalRule[] = [
     version: "2011.1",
     evidenceRequirement: "Declared MRP vs observed selling price; alteration detection.",
     status: "active",
-    engineEnabled: true,
+    engineEnabled: false,
   },
   {
     ruleId: "LM-PC-19",

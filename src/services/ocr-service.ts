@@ -118,13 +118,14 @@ export interface MultiImagePipelineResult {
     field: "product_name" | "manufacturer" | "net_quantity" | "mrp" | "date" | "consumer_care" | "country_of_origin" | "unit_sale_price" | "dimensions" | "best_before" | "batch_number";
     value: string | null;
     rawValue?: string;
-    status: "DETECTED" | "NOT_DETECTED";
+    status: "DETECTED" | "NOT_DETECTED" | "CONFLICT";
     confidence: number | null;
     sourceImageId?: string;
     bbox?: BoundingBox;
     polygon?: number[][];
     legalRules?: string[];
     evidence?: { rawText: string; boundingBox?: BoundingBox; polygon?: number[][] };
+    candidates?: Array<{ value: string; sourceImageId?: string; rawValue?: string; bbox?: BoundingBox; polygon?: number[][] }>;
     consumerCareDetails?: any;
   }>;
   rawOcrText: string;
@@ -159,11 +160,43 @@ const PIPELINE_TARGET_FIELDS: DeclarationField[] = [
 function toTextLines(
   detections: MultiImagePipelineResult["images"][number]["detections"]
 ): TextLine[] {
-  return detections.map((d) => ({
+  const lines: TextLine[] = detections.map((d) => ({
     text: d.text,
     confidence: Math.round(d.confidence * 100),
     bbox: d.bbox,
+    // Propagate resolution-independent prominence metadata from Python pipeline.
+    // When present, field-extraction uses these instead of raw pixel thresholds.
+    relativeHeight: (d as any).relativeHeight as number | undefined,
+    centerX: (d as any).centerX as number | undefined,
+    centerY: (d as any).centerY as number | undefined,
   }));
+  // If Python didn't supply relativeHeight (e.g. Tesseract fallback), compute
+  // it here so field-extraction always has a resolution-independent signal.
+  if (lines.length > 0 && lines[0].relativeHeight == null) {
+    computeRelativeHeights(lines);
+  }
+  return lines;
+}
+
+/**
+ * Compute relativeHeight = line_height / median_height for all lines.
+ * Used as fallback when Python pipeline doesn't provide these values.
+ */
+function computeRelativeHeights(lines: TextLine[]): void {
+  const heights = lines.map((l) => l.bbox.height).filter((h) => h > 0);
+  if (heights.length === 0) return;
+  const sorted = [...heights].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median =
+    sorted.length % 2 === 1
+      ? sorted[mid]
+      : (sorted[mid - 1] + sorted[mid]) / 2;
+  if (median <= 0) return;
+  for (const l of lines) {
+    l.relativeHeight = Math.round((l.bbox.height / median) * 1000) / 1000;
+    l.centerX = Math.round((l.bbox.x + l.bbox.width / 2) * 100) / 100;
+    l.centerY = Math.round((l.bbox.y + l.bbox.height / 2) * 100) / 100;
+  }
 }
 
 /**
@@ -173,7 +206,8 @@ function toTextLines(
  */
 function declarationsFromLines(
   lines: TextLine[],
-  targetFields: DeclarationField[]
+  targetFields: DeclarationField[],
+  sourceImageId?: string,
 ): MultiImagePipelineResult["declarations"] {
   const candidates = extractFieldCandidates(lines, targetFields);
   const bestByField = new Map<string, (typeof candidates)[number]>();
@@ -187,10 +221,99 @@ function declarationsFromLines(
     value: c.value,
     rawValue: c.rawText,
     status: "DETECTED" as const,
-    confidence: Math.round(Math.min(1, Math.max(0.1, (c.confidence ?? 50) / 100)) * 100) / 100,
+    confidence: c.confidence != null ? Math.round(Math.min(1, Math.max(0.1, c.confidence > 1 ? c.confidence / 100 : c.confidence)) * 1000) / 1000 : null,
     bbox: c.bbox,
     evidence: { rawText: c.rawText, boundingBox: c.bbox },
+    sourceImageId,
   }));
+}
+
+function multiImageDeclarationsFromImages(
+  images: MultiImagePipelineResult["images"],
+  targetFields: DeclarationField[]
+): MultiImagePipelineResult["declarations"] {
+  const allCandidates: Array<import("@/services/field-extraction").FieldCandidate & { sourceImageId: string }> = [];
+
+  for (const img of images) {
+    const lines = toTextLines(img.detections);
+    const cands = extractFieldCandidates(lines, targetFields);
+    for (const c of cands) {
+      if (c.value) {
+        allCandidates.push({ ...c, sourceImageId: img.id });
+      }
+    }
+  }
+
+  const declarations: MultiImagePipelineResult["declarations"] = [];
+
+  for (const field of targetFields) {
+    const fieldCands = allCandidates.filter((c) => c.field === field);
+    if (fieldCands.length === 0) {
+      declarations.push({
+        field: field as any,
+        value: null,
+        status: "NOT_DETECTED",
+        confidence: null,
+      });
+      continue;
+    }
+
+    const grouped = new Map<string, typeof fieldCands>();
+    for (const c of fieldCands) {
+      const normKey = c.value.trim().toUpperCase().replace(/\s+/g, " ");
+      const list = grouped.get(normKey) ?? [];
+      list.push(c);
+      grouped.set(normKey, list);
+    }
+
+    const distinctKeys = Array.from(grouped.keys());
+    const sourceImageIds = Array.from(new Set(fieldCands.map((c) => c.sourceImageId)));
+    const bestCand = fieldCands.reduce((prev, curr) => (curr.score > prev.score ? curr : prev));
+
+    const candList = fieldCands.map((c) => ({
+      value: c.value,
+      sourceImageId: c.sourceImageId,
+      rawValue: c.rawText,
+      bbox: c.bbox,
+    }));
+
+    const candConf = bestCand.confidence != null
+      ? Math.round(Math.min(1, Math.max(0.1, bestCand.confidence > 1 ? bestCand.confidence / 100 : bestCand.confidence)) * 1000) / 1000
+      : null;
+
+    if (distinctKeys.length === 1) {
+      declarations.push({
+        field: field as any,
+        value: bestCand.value,
+        rawValue: bestCand.rawText,
+        status: "DETECTED",
+        confidence: candConf,
+        bbox: bestCand.bbox,
+        evidence: { rawText: bestCand.rawText, boundingBox: bestCand.bbox },
+        sourceImageId: bestCand.sourceImageId,
+        sourceImageIds,
+        candidates: candList,
+      } as any);
+    } else {
+      const distinctVals = distinctKeys.map((k) => grouped.get(k)![0].value);
+      const conflictVal = `CONFLICT: ${distinctVals.join(" vs ")}`;
+      declarations.push({
+        field: field as any,
+        value: conflictVal,
+        rawValue: fieldCands.map((c) => c.rawText).join(" | "),
+        status: "CONFLICT" as any,
+        conflict: true,
+        confidence: candConf,
+        bbox: bestCand.bbox,
+        evidence: { rawText: conflictVal, boundingBox: bestCand.bbox },
+        sourceImageId: bestCand.sourceImageId,
+        sourceImageIds,
+        candidates: candList,
+      } as any);
+    }
+  }
+
+  return declarations;
 }
 
 function mergeDeclarationsInto(
@@ -212,11 +335,13 @@ export class PaddleOcrService {
     if (process.env.PYTHON_PATH && fs.existsSync(process.env.PYTHON_PATH)) {
       return process.env.PYTHON_PATH;
     }
+    const venvWinPy = path.resolve(process.cwd(), ".venv/Scripts/python.exe");
+    if (fs.existsSync(venvWinPy)) return venvWinPy;
     const venvPy = path.resolve(process.cwd(), ".venv/bin/python");
     if (fs.existsSync(venvPy)) return venvPy;
     const altPy = "/opt/homebrew/bin/python3.11";
     if (fs.existsSync(altPy)) return altPy;
-    return "python3";
+    return process.platform === "win32" ? "python" : "python3";
   }
 
   private getScriptPath(): string {
@@ -305,9 +430,10 @@ export class PaddleOcrService {
     // Forced-fallback mode: skip Python entirely (testing / operator choice).
     if (mode === "tesseract") {
       const fb = await this.runTesseractForImages(images);
+      const multiDecls = multiImageDeclarationsFromImages(fb.images, PIPELINE_TARGET_FIELDS);
       return {
         ...fb,
-        declarations: declarationsFromLines(fb.images.flatMap((im) => toTextLines(im.detections)), PIPELINE_TARGET_FIELDS),
+        declarations: multiDecls,
         engine: {
           ok: true,
           engine: TESSERACT_ENGINE,
@@ -408,9 +534,10 @@ export class PaddleOcrService {
       // Full-batch Tesseract fallback: the inspection must never come back
       // "analysis completed, nothing found" because the OCR env is broken.
       const fb = await this.runTesseractForImages(images);
+      const multiDecls = multiImageDeclarationsFromImages(fb.images, PIPELINE_TARGET_FIELDS);
       return {
         ...fb,
-        declarations: declarationsFromLines(fb.images.flatMap((im) => toTextLines(im.detections)), PIPELINE_TARGET_FIELDS),
+        declarations: multiDecls,
         engine: {
           ...failureStatus,
           fallbackUsed: true,

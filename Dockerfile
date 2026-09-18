@@ -22,9 +22,9 @@ COPY prisma ./prisma/
 # Install Node dependencies
 RUN npm ci
 
-# Create Python virtual environment and install ML requirements
-RUN python3 -m venv /app/.venv && \
-    /app/.venv/bin/pip install --no-cache-dir pillow pypdf
+# Create Python virtual environment outside the Next.js project
+RUN python3 -m venv /opt/inspectra-venv && \
+    /opt/inspectra-venv/bin/pip install --no-cache-dir pillow pypdf
 
 # Generate Prisma Client
 RUN npx prisma generate
@@ -36,9 +36,10 @@ COPY . .
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+ENV PATH="/opt/inspectra-venv/bin:$PATH"
 
 # Expose Next.js server port
 EXPOSE 3000
 
 # Apply database migrations, seed statutory data, then serve.
-CMD ["sh", "-c", "npx prisma migrate deploy && node prisma/seed.ts && npm run start"]
+CMD ["sh", "-c", "npm run build && npx prisma migrate deploy && npx tsx prisma/seed.ts && npm run start"]

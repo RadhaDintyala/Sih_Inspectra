@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inspectra_secret}
       POSTGRES_DB: ${POSTGRES_DB:-inspectra_db}
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -37,7 +37,7 @@ services:
 
   # MinIO S3-Compatible Object Storage for Evidence Images & Reports
   storage:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     container_name: inspectra-storage
     restart: unless-stopped
     command: server /data --console-address ":9001"

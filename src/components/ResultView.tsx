@@ -440,7 +440,18 @@ export function ResultView({
                   zIndex: 10,
                 }}
               >
-                {showBoundingBoxes && currentImage.detections?.map((d) => {
+                {showBoundingBoxes && currentImage.detections
+                  // Render-time display guard: only draw boxes for detections that
+                  // are reasonably confident AND have a plausible bbox size.
+                  // This is a second defence layer — it catches stale DB detections
+                  // produced before the Python-side display_detections filter was
+                  // added (confidence ≥ 0.40, both bbox sides ≥ 0.3% of image).
+                  ?.filter((d) =>
+                    d.confidence >= 0.40 &&
+                    d.bbox.width >= 0.3 &&
+                    d.bbox.height >= 0.3
+                  )
+                  .map((d) => {
                   const isSelected = selectedField && (
                     d.className === selectedField ||
                     (inspection.declarations.find((decl) => decl.field === selectedField)?.evidenceImageId === currentImage.id)
@@ -463,7 +474,7 @@ export function ResultView({
 
                 {/* Render Selected & Matched Declarations */}
                 {inspection.declarations
-                  .filter((d) => d.status === "DETECTED" && (d.polygon || d.boundingBox) && (!d.evidenceImageId || d.evidenceImageId === currentImage.id || currentImage.id.includes(d.evidenceImageId) || d.evidenceImageId.includes(currentImage.id)))
+                  .filter((d) => d.status === "DETECTED" && Boolean(d.value && d.value.trim()) && (d.polygon || d.boundingBox) && (!d.evidenceImageId || d.evidenceImageId === currentImage.id || currentImage.id.includes(d.evidenceImageId) || d.evidenceImageId.includes(currentImage.id)))
                   .map((decl) => {
                     const isSelected = selectedField === decl.field;
                     const strokeColor = isSelected ? "#2563eb" : "#10b981";

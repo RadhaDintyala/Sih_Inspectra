@@ -24,6 +24,20 @@ export interface TextLine {
   text: string;
   confidence: number;
   bbox: BoundingBox;
+  polygon?: number[][];
+  imageId?: string;
+  /**
+   * Ratio of this line's bbox height to the median bbox height of all lines
+   * in the same image. Resolution-independent prominence signal.
+   * relativeHeight > 2.5 ≈ headline / brand name text.
+   * relativeHeight ≈ 1.0 ≈ typical body / label text.
+   * Populated by ocr-service from the Python pipeline output.
+   */
+  relativeHeight?: number;
+  /** Horizontal centre of bbox in percentage coordinates. */
+  centerX?: number;
+  /** Vertical centre of bbox in percentage coordinates. */
+  centerY?: number;
 }
 
 export interface FieldCandidate {
@@ -110,12 +124,31 @@ function extractSingleField(field: DeclarationField, lines: TextLine[]): FieldCa
         }
       }
 
-      // Also try geometry-based match for product name
-      const isTopHalf = line.bbox.y < 50;
-      const isLargeText = line.bbox.height > 4;
+      // Also try geometry-based match for product name (must not match any statutory declaration anchor)
+      const allStatutoryAnchors = Object.entries(FIELD_ANCHORS)
+        .filter(([k]) => k !== "product_name")
+        .flatMap(([, v]) => v);
+      // Use distance=0 for short-name statutory check (exact match only — no fuzzy).
+      const isStatutoryLine = matchAnchor(line.text, allStatutoryAnchors, 2) !== null;
+      const isStatutoryExact = matchAnchor(line.text, allStatutoryAnchors, 0) !== null;
+
+      // Resolution-independent prominence: use relativeHeight when available,
+      // fall back to raw bbox.height divided by a typical body-text height (4%).
+      const relH = line.relativeHeight ?? (line.bbox.height > 0 ? line.bbox.height / 4 : 1.0);
+
+      // Position OK: in the top 70% of the image, OR text is larger than median.
+      const isProminentPosition = line.bbox.y < 70;
+      const isProminentSize = relH >= 1.5;       // larger than median label text
+      const isVeryProminentSize = relH >= 2.5;   // headline / brand-name text
+      // Discard near-zero height noise only (artefacts with no real bbox).
+      const isVisibleText = line.bbox.height > 0.5;
       const isNotNumeric = !/^\d/.test(line.text.trim());
-      const isLongEnough = line.text.replace(/\s+/g, "").length >= 3;
-      if (isTopHalf && isLargeText && isNotNumeric && isLongEnough && !anchorMatch) {
+      const positionOk = isProminentPosition || isProminentSize;
+
+      // ── Standard path: any text that passes the normalizer at a prominent position ─
+      // We do NOT gate on text length here — a 2-char brand name at prominence
+      // is valid evidence. normalizeProductName is the semantic gate.
+      if (positionOk && isVisibleText && isNotNumeric && !isStatutoryLine) {
         const normalized = normalizeProductName(line.text);
         if (normalized) {
           const score = computeFieldScore(field, line, 0.5, normalized);
@@ -130,6 +163,40 @@ function extractSingleField(field: DeclarationField, lines: TextLine[]): FieldCa
           });
         }
       }
+
+      // ── Short-name path: 2–4 letter brand names (VIM, ORS, ACT, A1, etc.) ──
+      // Gate on relativeHeight > 2.5 (substantially larger than median text).
+      // Statutory abbreviations ("MRP", "Mfg", "Ltd") appear at body-text size
+      // (relativeHeight ≈ 1.0) — they will not pass this threshold.
+      // All-caps or Title-case is required (brand naming convention on FMCG packs).
+      const rawTrimmed = line.text.trim();
+      const isPurelyAlpha = /^[a-zA-Z\s-]+$/.test(rawTrimmed);
+      const isAllCapsOrTitle =
+        rawTrimmed === rawTrimmed.toUpperCase() ||
+        /^[A-Z][a-zA-Z\s-]*$/.test(rawTrimmed);
+      const strippedLen = rawTrimmed.replace(/\s+/g, "").length;
+
+      if (
+        isVeryProminentSize &&
+        isPurelyAlpha &&
+        isAllCapsOrTitle &&
+        strippedLen >= 2 &&
+        strippedLen <= 4 &&
+        !isStatutoryExact &&
+        !isStatutoryLine
+      ) {
+        const cleanedShort = rawTrimmed.charAt(0).toUpperCase() + rawTrimmed.slice(1).toLowerCase();
+        candidates.push({
+          field,
+          value: cleanedShort,
+          rawText: rawTrimmed,
+          score: computeFieldScore(field, line, 0.8, cleanedShort),
+          confidence: line.confidence,
+          bbox: line.bbox,
+          source: `geometry-match-short-name(relH=${relH.toFixed(1)})`,
+        });
+      }
+
       continue;
     }
 
@@ -152,6 +219,27 @@ function extractSingleField(field: DeclarationField, lines: TextLine[]): FieldCa
       valueText = lineParts.join(" ");
     } else {
       valueText = extractValueAfterAnchor(line.text, anchorMatch.anchor, anchorMatch.position);
+    }
+
+    // Fix 7 — net_quantity: marketing-phrase guard.
+    // Nutritional callouts ("3g protein", "38 kcal") and cooking timers
+    // ("Ready in 3 minutes") carry the same N + unit pattern as statutory
+    // net-quantity declarations. Reject them here before normalization.
+    if (field === "net_quantity") {
+      const marketingRe = /\b(?:minute|min|ready|protein|fat|fibre|fiber|energy|calorie|serving|per\s+\d|vitamin|calcium|iron|sodium|carb|sugar|cholesterol)\b/i;
+      if (marketingRe.test(valueText) || marketingRe.test(line.text)) {
+        candidates.push({
+          field,
+          value: "",
+          rawText: line.text,
+          score: 0,
+          confidence: line.confidence,
+          bbox: line.bbox,
+          source: `fuzzy-anchor-${anchorMatch.anchor}-marketing-guard-reject`,
+          rejectionReason: `marketing/nutritional callout — not a net-quantity declaration`,
+        });
+        continue;
+      }
     }
 
     // ── Normalize and validate ─────────────────────────────────────
@@ -308,6 +396,23 @@ function passesPlausibilityGate(
     const hasLongWord = tokens.some((t) => t.length >= 4);
     if (!hasLongWord) {
       return { passes: false, reason: "no word ≥ 4 chars for product name" };
+    }
+  }
+
+  // Fix 8 — manufacturer: require at least one entity/address signal.
+  // An anchor keyword ("Manufactured by") alone can fire on front-panel text;
+  // we also need a PIN code, Indian state name, or corporate suffix in the
+  // assembled value before we consider it a valid manufacturer declaration.
+  if (field === "manufacturer") {
+    const hasPIN = /\b\d{5,6}\b/.test(cleaned);
+    const hasState = /\b(?:karnataka|bangalore|bengaluru|mumbai|delhi|kolkata|chennai|hyderabad|pune|ahmedabad|gurgaon|noida|haryana|maharashtra|tamil\s*nadu|kerala|andhra|telangana|gujarat|rajasthan|punjab|uttar\s*pradesh|bihar|odisha|west\s*bengal|assam|goa|india)\b/i.test(cleaned);
+    const hasEntity = /\b(?:pvt\.?\s*ltd|limited|ltd\.?|llp|foods|industries|beverages|consumer\s*products|confectionery|bakeries|enterprises)\b/i.test(cleaned);
+    const hasAddressKw = /\b(?:road|rd|street|st|lane|nagar|sector|phase|industrial|midc|gidc|district|village|taluk|post|opp|near)\b/i.test(cleaned);
+    if (!((hasPIN || hasState) && (hasEntity || hasAddressKw))) {
+      return {
+        passes: false,
+        reason: "manufacturer value lacks address/entity signal — likely marketing text",
+      };
     }
   }
 

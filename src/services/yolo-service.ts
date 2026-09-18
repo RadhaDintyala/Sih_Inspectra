@@ -69,17 +69,17 @@ type FieldHint = Exclude<DeclarationField, "other">;
 
 const KEYWORD_PATTERNS: Array<{ field: FieldHint; keyword: RegExp; pattern: RegExp; weight: number }> = [
   { field: "mrp", keyword: /mrp|maximum\s*retail\s*price|inclusive\s*of\s*all\s*taxes/i, pattern: /(₹|rs\.?|inr)\s*\d/i, weight: 0.95 },
-  { field: "mrp", keyword: /₹|rs\.?|inr/i, pattern: /₹|\brs\.?\b|inr/i, weight: 0.8 },
-  { field: "net_quantity", keyword: /net\s*(qty|quantity|wt|weight|content)/i, pattern: /\d[\d.,]*\s*(kg|g|gm|grams?|ml|ltr|litres?|liters?|l|pcs|pieces?|nos?)\b/i, weight: 0.92 },
-  { field: "net_quantity", keyword: /net|extra/i, pattern: /\d[\d.,]*\s*(kg|g|gm|grams?|ml|ltr|litres?|liters?|l|pcs|pieces?|nos?)\b/i, weight: 0.78 },
+  { field: "mrp", keyword: /₹|rs\.?|inr/i, pattern: /(₹|\brs\.?\b|inr)\s*\d[\d.,]*/i, weight: 0.85 },
+  { field: "net_quantity", keyword: /net\s*(qty|quantity|wt|weight|content|contents)/i, pattern: /\d[\d.,]*\s*(kg|g|gm|grams?|ml|ltr|litres?|liters?|l|pcs|pieces?|nos?)\b/i, weight: 0.92 },
+  { field: "net_quantity", keyword: /net\b/i, pattern: /\d[\d.,]*\s*(kg|g|gm|grams?|ml|ltr|litres?|liters?|l\b|pcs|pieces?|nos?)(?!\s*(?:minute|min|protein|fat|calorie|serving))/i, weight: 0.82 },
   { field: "date", keyword: /mfd|mfg|manufactured|pkd|packed|packing|best\s*before|use\s*by|expiry|exp/i, pattern: /20\d{2}|(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b|\d{1,2}[\/\-.]\d{1,2}/i, weight: 0.9 },
-  { field: "date", keyword: /\b\d{1,2}[\/\-.]\d{2,4}\b|\b\d{4}[\/\-.]\d{1,2}\b/i, pattern: /\d[\/\-.]\d/, weight: 0.72 },
-  { field: "manufacturer", keyword: /manufactured|mfd\.?\s*by|mfg\.?\s*by|packed\s*by|packer|marketed\s*by|imported\s*by|mktd|hungerford/i, pattern: /by\b.{4,}|hungerford/i, weight: 0.88 },
-  { field: "manufacturer", keyword: /pvt\.?\s*ltd|limited|llp|enterprises|foods|industries|products|works/i, pattern: /.{8,}/i, weight: 0.82 },
+  { field: "date", keyword: /\b\d{1,2}[\/\-.]\d{2,4}\b|\b\d{4}[\/\-.]\d{1,2}\b/i, pattern: /\d[\/\-.]\d/, weight: 0.75 },
+  { field: "manufacturer", keyword: /manufactured|mfd\.?\s*by|mfg\.?\s*by|packed\s*by|packer|marketed\s*by|imported\s*by|mktd|hungerford/i, pattern: /by\b.{3,}|hungerford/i, weight: 0.88 },
+  { field: "manufacturer", keyword: /pvt\.?\s*ltd|limited|llp|enterprises\s*ltd|industries\s*ltd|products\s*ltd/i, pattern: /.{5,}\b(ltd|limited|llp|inc|corp)\b/i, weight: 0.82 },
   { field: "consumer_care", keyword: /consumer\s*care|customer\s*care|toll\s*free|helpline|feedback|complaint|1800|1860|@|www\.|\.com|\.in/i, pattern: /1800|1860|\d{4}[\s-]\d{3,}|@|www\./i, weight: 0.88 },
   { field: "country_of_origin", keyword: /country\s*of\s*origin|made\s*in|product\s*of|origin/i, pattern: /made\s*in|origin/i, weight: 0.85 },
-  { field: "country_of_origin", keyword: /india|bharat|china|usa|germany|japan|bangladesh|sri\s*lanka|nepal|vietnam|thailand|indonesia|malaysia/i, pattern: /india|bharat|china|usa|germany|japan/i, weight: 0.7 },
-  { field: "unit_sale_price", keyword: /unit\s*sale\s*price|per\s*(g|kg|ml|l\b|piece)|\/\s*(g|gm|kg|ml|l)/i, pattern: /₹|\brs\.?\b|\d+\.\d+\s*\/\s*(?:g|gm|kg|ml|l)/i, weight: 0.85 },
+  { field: "country_of_origin", keyword: /made\s*in\s*(india|china|usa|germany|japan)|country\s*of\s*origin\s*:\s*\w+/i, pattern: /india|china|usa|germany|japan/i, weight: 0.8 },
+  { field: "unit_sale_price", keyword: /unit\s*sale\s*price|per\s*(g|kg|ml|l\b|piece)|\/\s*(g|gm|kg|ml|l)/i, pattern: /(₹|\brs\.?\b)?\s*\d+(\.\d+)?\s*\/\s*(?:g|gm|kg|ml|l)/i, weight: 0.85 },
 ];
 
 export function classifyLine(text: string): { field: FieldHint; weight: number } | null {
@@ -90,8 +90,9 @@ export function classifyLine(text: string): { field: FieldHint; weight: number }
     const hasKeyword = rule.keyword.test(t);
     const hasPattern = rule.pattern.test(t);
     if (rule.field === "mrp" || rule.field === "net_quantity" || rule.field === "unit_sale_price") {
-      if (!hasPattern && !hasKeyword) continue;
-      const w = hasKeyword && hasPattern ? rule.weight : rule.weight - 0.12;
+      // Require BOTH keyword AND numeric pattern for quantitative statutory fields
+      if (!hasPattern || !hasKeyword) continue;
+      const w = rule.weight;
       if (!best || w > best.weight) best = { field: rule.field, weight: w };
     } else if (hasKeyword && hasPattern) {
       if (!best || rule.weight > best.weight) best = { field: rule.field, weight: rule.weight };

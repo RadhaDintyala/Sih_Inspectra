@@ -369,32 +369,36 @@ export async function processInspectionPipeline(job: PipelineJob): Promise<Inspe
           modelVersion: "ppocr-v4-onnx",
         }));
 
-        await prisma.evidenceImageRecord.update({
-          where: { id: evImage.id },
-          data: {
-            processingStatus: "COMPLETED",
-            quality: "sufficient",
-            qualitySignal: JSON.stringify({
-              blurDetected: false,
-              glareDetected: false,
-              cropDetected: false,
-              legibilityScore: Math.round((match.packageConfidence || 0.95) * 100),
-            }),
-          },
-        });
-
-        // Store detection records
-        for (const det of match.detections) {
-          await prisma.detectionRecord.create({
+        try {
+          await prisma.evidenceImageRecord.update({
+            where: { id: evImage.id },
             data: {
-              evidenceImageId: evImage.id,
-              modelVersion: "ppocr-v4-onnx",
-              detector: "paddleocr-dbnet",
-              className: det.className,
-              bboxJson: JSON.stringify(det.bbox),
-              confidence: det.confidence,
+              processingStatus: "COMPLETED",
+              quality: "sufficient",
+              qualitySignal: JSON.stringify({
+                blurDetected: false,
+                glareDetected: false,
+                cropDetected: false,
+                legibilityScore: Math.round((match.packageConfidence || 0.95) * 100),
+              }),
             },
           });
+
+          // Store detection records
+          for (const det of match.detections) {
+            await prisma.detectionRecord.create({
+              data: {
+                evidenceImageId: evImage.id,
+                modelVersion: "ppocr-v4-onnx",
+                detector: "paddleocr-dbnet",
+                className: det.className,
+                bboxJson: JSON.stringify(det.bbox),
+                confidence: det.confidence,
+              },
+            });
+          }
+        } catch (err) {
+          console.warn(`[PipelineWorker] evidenceImageRecord update note (${evImage.id}):`, (err as Error).message);
         }
       }
     }
@@ -405,22 +409,38 @@ export async function processInspectionPipeline(job: PipelineJob): Promise<Inspe
 
     for (const field of TARGET_FIELDS) {
       const declMatch = batchResult.declarations.find((d) => d.field === field);
-      if (declMatch && declMatch.status === "DETECTED" && declMatch.value) {
+      if (declMatch && (declMatch.status === "DETECTED" || declMatch.status === "CONFLICT") && declMatch.value) {
         // Find matching source image id
         let sourceImgId = declMatch.sourceImageId || evidenceImages[0]?.id;
         const matchingEv = evidenceImages.find((ev) => sourceImgId.includes(ev.id) || ev.id.includes(sourceImgId));
         if (matchingEv) sourceImgId = matchingEv.id;
 
+        const mappedCandidates = (declMatch.candidates || [{ value: declMatch.value, sourceImageId: sourceImgId, rawValue: declMatch.rawValue }]).map((c: any) => {
+          let cSourceId = c.sourceImageId || sourceImgId;
+          const matchC = evidenceImages.find((ev) => cSourceId.includes(ev.id) || ev.id.includes(cSourceId));
+          if (matchC) cSourceId = matchC.id;
+          return {
+            value: c.value,
+            sourceImageId: cSourceId,
+            rawValue: c.rawValue || c.value,
+            bbox: c.bbox,
+            polygon: c.polygon,
+          };
+        });
+
+        const distinctEvIds = Array.from(new Set(mappedCandidates.map((c: any) => c.sourceImageId).filter(Boolean))) as string[];
+
         declarations.push({
           field,
-          value: field === "date"
+          value: field === "date" && declMatch.status === "DETECTED"
             ? (normalizeDate(declMatch.value) ?? declMatch.value)
             : declMatch.value,
           rawValue: declMatch.rawValue || declMatch.value,
-          status: "DETECTED",
+          status: declMatch.status as Declaration["status"],
+          conflict: (declMatch.status as string) === "CONFLICT" || Boolean((declMatch as any).conflict),
           confidence: declMatch.confidence ?? 0.95,
           evidenceImageId: sourceImgId,
-          evidenceImageIds: [sourceImgId],
+          evidenceImageIds: distinctEvIds.length > 0 ? distinctEvIds : [sourceImgId],
           boundingBox: declMatch.bbox,
           polygon: declMatch.polygon,
           evidence: {
@@ -428,7 +448,7 @@ export async function processInspectionPipeline(job: PipelineJob): Promise<Inspe
             boundingBox: declMatch.bbox,
             polygon: declMatch.polygon,
           },
-          candidates: [{ value: declMatch.value, sourceImageId: sourceImgId, rawValue: declMatch.rawValue }],
+          candidates: mappedCandidates,
           consumerCareDetails: declMatch.consumerCareDetails,
         });
       } else {
@@ -441,6 +461,8 @@ export async function processInspectionPipeline(job: PipelineJob): Promise<Inspe
         });
       }
     }
+
+    console.log(`[DETERM] stage=DECLARATIONS summary=${declarations.map(d => `${d.field}:${d.status}=${d.value ?? "null"}`).join(" | ")}`);
 
     // ── 3.5. Merge e-commerce listing declarations ─────────────────────
     // Rule 6(10A) e-commerce mode: the product listing is primary evidence
@@ -490,6 +512,8 @@ export async function processInspectionPipeline(job: PipelineJob): Promise<Inspe
     });
     const status = verdictToStatus(verdict);
     const score = complianceScore(checks);
+
+    console.log(`[DETERM] stage=VERDICT verdict=${verdict} status=${status} score=${score}`);
 
     const extractedProd = declarations.find((d) => d.field === "product_name")?.value;
     const productName = extractedProd && extractedProd.trim() ? extractedProd : "Packaged Commodity";

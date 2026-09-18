@@ -396,7 +396,11 @@ export function normalizeManufacturer(raw: string): string | null {
 /**
  * Normalize product name.
  * Rejects corrupt non-lexical fragments or strings lacking alphabetic substance.
- * Requires at least one real English word (≥4 letters from a common-words list).
+ *
+ * Acceptance criteria (any one is sufficient):
+ *   A. Has a token ≥4 letters that is in the PRODUCT_NAME_WORDS dictionary, OR
+ *   B. Has a purely alphabetic token ≥5 letters (captures brand-names like JIMJAM,
+ *      Kurkure, Horlicks that are not in generic dictionary lists).
  */
 export function normalizeProductName(raw: string): string | null {
   const cleaned = cleanText(raw);
@@ -422,15 +426,23 @@ export function normalizeProductName(raw: string): string | null {
   // Need at least one alphabetic token
   if (alphaTokens.length === 0) return null;
 
-  // Must contain at least one real dictionary word (≥4 letters)
+  // Path A: has a token from the known-words dictionary (≥4 letters)
   const hasRealWord = alphaTokens.some((t) => t.length >= 4 && PRODUCT_NAME_WORDS.has(t));
-  if (!hasRealWord) return null;
+
+  // Path B: has a long purely-alphabetic token (≥4 letters) — captures brand names
+  // like "OREO", "MILO", "DANO", "JIMJAM", "Kurkure" that aren't in a generic word list.
+  // The 4-char minimum excludes 3-letter noise (OCR artifacts) while allowing
+  // 4-char brand names. The field-extraction relativeHeight gate provides the
+  // geometric evidence that this is actually a brand name and not body-text noise.
+  const hasBrandToken = alphaTokens.some((t) => t.length >= 4);
+
+  if (!hasRealWord && !hasBrandToken) return null;
 
   return cleaned;
 }
 
 /**
- * Common English words found on Indian packaged commodities.
+ * Common English words and Indian FMCG brand tokens found on packaged commodities.
  * Used ONLY for product_name plausibility — missing a word means
  * safe fallback to NOT_DETECTED, never a false DETECTED.
  */
@@ -465,7 +477,25 @@ const PRODUCT_NAME_WORDS = new Set([
   "website", "address", "contact", "service", "support", "help",
   "ltd", "limited", "pvt", "private", "enterprises", "foods", "industries",
   "products", "works", "company", "corp", "inc",
+  // Indian FMCG brand tokens — explicitly added so brand names are
+  // accepted even when they don't match the common English word list.
+  "jimjam", "bikis", "nutrichoice", "tiger", "bourbon", "marie",
+  "kurkure", "horlicks", "bournvita", "complan", "protinex",
+  "glucond", "electral", "hajmola", "chyawanprash", "ashirvaad",
+  "yippee", "sunfeast", "maggi", "kissan", "knorr", "haldirams",
+  "saffola", "parachute", "vatika", "himalaya", "dabur", "zandu",
+  "volini", "iodex", "vicks", "pepsodent", "closeup", "colgate",
+  "dettol", "lifebuoy", "nixoderm", "rexona", "clinic", "pantene",
+  "garnier", "nivea", "vaseline", "johnson", "pampers", "huggies",
+  "whisper", "stayfree", "tropicana", "frooti", "appy", "sprite",
+  "fanta", "pepsi", "thums", "bisleri", "kinley", "aquafina",
+  "revital", "supradyn", "becosules", "crocin", "paracetamol",
+  "glucose", "marie", "oreo", "bourbon", "bourbon", "parleg",
+  "milkmaid", "nandini", "epigamia", "weikfield", "bagrrys", "kelloggs",
+  "munch", "kitkat", "alpenliebe", "eclairs", "melody", "pulse",
+  "bikano", "muncho", "tooyumm", "popcorn", "lays", "kurkure",
 ]);
+
 
 /**
  * Normalize country of origin.
