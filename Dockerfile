@@ -32,6 +32,9 @@ RUN npx prisma generate
 # Copy application source code
 COPY . .
 
+# Build Next.js application
+RUN npm run build
+
 # Set environment
 ENV NODE_ENV=production
 ENV PORT=3000
@@ -42,4 +45,4 @@ ENV PATH="/opt/inspectra-venv/bin:$PATH"
 EXPOSE 3000
 
 # Apply database migrations, seed statutory data, then serve.
-CMD ["sh", "-c", "npm run build && npx prisma migrate deploy && npx tsx prisma/seed.ts && npm run start"]
+CMD ["sh", "-c", "npx prisma migrate deploy && npm run seed && npm run start"]

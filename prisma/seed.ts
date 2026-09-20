@@ -75,6 +75,22 @@ async function main() {
       name: "Inspector Vinayak Patil",
       badgeNumber: "MH-LM-208",
     },
+    {
+      organizationId: orgDelhi.id,
+      username: "officer_demo",
+      password: "Inspectra@Officer2026!",
+      role: "ENFORCEMENT_OFFICER",
+      name: "Legal Metrology Inspector (Demo)",
+      badgeNumber: "DL-LM-101",
+    },
+    {
+      organizationId: orgDelhi.id,
+      username: "admin_demo",
+      password: "Inspectra@Admin2026!",
+      role: "ADMIN",
+      name: "Senior Administrator (Demo)",
+      badgeNumber: "DL-LM-A01",
+    },
   ];
 
   for (const u of users) {

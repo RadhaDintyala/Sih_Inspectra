@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Relational Database for Multi-Tenancy & Audit Logging
   db:
@@ -11,9 +9,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inspectra_secret}
       POSTGRES_DB: ${POSTGRES_DB:-inspectra_db}
     ports:
-      - "5433:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - inspectra-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-inspectra} -d ${POSTGRES_DB:-inspectra_db}"]
       interval: 5s
@@ -29,6 +29,8 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    networks:
+      - inspectra-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -49,6 +51,8 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
+    networks:
+      - inspectra-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
@@ -81,6 +85,8 @@ services:
         condition: service_healthy
       storage:
         condition: service_healthy
+    networks:
+      - inspectra-net
     volumes:
       - evidence_vault:/app/.scan-store
 
@@ -109,8 +115,14 @@ services:
         condition: service_healthy
       storage:
         condition: service_healthy
+    networks:
+      - inspectra-net
     volumes:
       - evidence_vault:/app/.scan-store
+
+networks:
+  inspectra-net:
+    driver: bridge
 
 volumes:
   postgres_data:

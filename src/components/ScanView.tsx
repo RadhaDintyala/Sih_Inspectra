@@ -194,6 +194,7 @@ export function ScanView({
     };
   }, [cameraOpen, liveDetectEnabled]);
 
+
   // Feed the latest Tier-0 quality and server package-gate state into the
   // engine's dispatch policy (smart dispatch: no OCR while blurry/no package).
   useEffect(() => {
@@ -292,11 +293,6 @@ export function ScanView({
   const rotationRef = useRef(rotation);
   rotationRef.current = rotation;
 
-  // tier0Result is declared earlier in the component (see above) to avoid
-  // the temporal dead zone in the useEffect that feeds it to the live engine.
-
-  // serverGate is declared earlier in the component (see above) to avoid
-  // the temporal dead zone in the useEffect that feeds it to the live engine.
   const gateInFlightRef = useRef(false);
   const gateCheck = async () => {
     const video = videoRef.current;
