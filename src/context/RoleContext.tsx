@@ -14,6 +14,7 @@ export interface RoleContextType {
   logout: () => Promise<void>;
   isAdmin: boolean;
   isOfficer: boolean;
+  isReviewer: boolean;
 }
 
 const RoleContext = createContext<RoleContextType | undefined>(undefined);
@@ -61,6 +62,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
 
   const role: UserRole = user?.role || "officer";
 
+  const userRoleStr = (user?.role || "").toLowerCase();
   const value: RoleContextType = {
     user,
     role,
@@ -68,8 +70,9 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     isLoadingAuth,
     login,
     logout,
-    isAdmin: user?.role === "admin",
-    isOfficer: user?.role === "officer",
+    isAdmin: userRoleStr === "admin",
+    isOfficer: userRoleStr === "officer" || userRoleStr === "enforcement_officer",
+    isReviewer: userRoleStr === "reviewer",
   };
 
   return <RoleContext.Provider value={value}>{children}</RoleContext.Provider>;

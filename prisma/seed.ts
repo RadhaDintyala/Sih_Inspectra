@@ -1,12 +1,10 @@
 import { PrismaClient } from "@prisma/client";
-import crypto from "node:crypto";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
 function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16).toString("hex");
-  const hash = crypto.pbkdf2Sync(password, salt, 100_000, 64, "sha512").toString("hex");
-  return `${salt}:${hash}`;
+  return bcrypt.hashSync(password, 12);
 }
 
 async function main() {
@@ -41,7 +39,7 @@ async function main() {
 
   console.log(`✓ Seeded Organizations: ${orgDelhi.code}, ${orgMaha.code}`);
 
-  // 2. Seed Users
+  // 2. Seed Users (Only admin, officer, and reviewer)
   const users = [
     {
       organizationId: orgDelhi.id,
@@ -67,31 +65,16 @@ async function main() {
       name: "Legal Officer Sunita Verma",
       badgeNumber: "DL-LM-R02",
     },
-    {
-      organizationId: orgMaha.id,
-      username: "officer_maha",
-      password: "officer123",
-      role: "ENFORCEMENT_OFFICER",
-      name: "Inspector Vinayak Patil",
-      badgeNumber: "MH-LM-208",
-    },
-    {
-      organizationId: orgDelhi.id,
-      username: "officer_demo",
-      password: "Inspectra@Officer2026!",
-      role: "ENFORCEMENT_OFFICER",
-      name: "Legal Metrology Inspector (Demo)",
-      badgeNumber: "DL-LM-101",
-    },
-    {
-      organizationId: orgDelhi.id,
-      username: "admin_demo",
-      password: "Inspectra@Admin2026!",
-      role: "ADMIN",
-      name: "Senior Administrator (Demo)",
-      badgeNumber: "DL-LM-A01",
-    },
   ];
+
+  // Purge any extra users not in the approved list
+  const allowedUsernames = users.map((u) => u.username);
+  const deleted = await prisma.user.deleteMany({
+    where: { username: { notIn: allowedUsernames } },
+  });
+  if (deleted.count > 0) {
+    console.log(`✓ Purged ${deleted.count} extra user account(s) from database.`);
+  }
 
   for (const u of users) {
     const passwordHash = hashPassword(u.password);

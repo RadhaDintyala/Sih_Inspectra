@@ -18,7 +18,7 @@ describe("PBKDF2 Password Hashing & HMAC Session Token Security", () => {
     const password = "SuperSecretPassword123!";
     const storedHash = hashPassword(password);
 
-    expect(storedHash).toContain(":");
+    expect(storedHash.startsWith("$2b$") || storedHash.startsWith("$2a$") || storedHash.includes(":")).toBe(true);
     expect(verifyPassword(password, storedHash)).toBe(true);
     expect(verifyPassword("WrongPassword", storedHash)).toBe(false);
     expect(verifyPassword(password, "invalid_hash_string")).toBe(false);

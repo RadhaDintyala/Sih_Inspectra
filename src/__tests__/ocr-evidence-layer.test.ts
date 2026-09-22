@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file ocr-evidence-layer.test.ts
  *
  * Tests the principle: "OCR = collect all visible text; field-extraction = interpret it."
@@ -175,8 +175,18 @@ describe("OCR Evidence Layer — extract broadly, interpret selectively", () => 
         makeLine("Batch No: B2X4501", { height: 3, relativeHeight: 0.75, y: 90 }),
       ];
       const candidates = extractFieldCandidates(lines, ["batch_number"]);
-      const batchCands = candidates.filter((c) => c.field === "batch_number");
+      const batchCands = candidates.filter((c) => c.field === "batch_number" && c.value);
       expect(batchCands.length).toBeGreaterThan(0);
+      expect(batchCands[0].value).toBe("B2X4501");
+    });
+
+    it("rejects long composition prose as batch_number", () => {
+      const lines: TextLine[] = [
+        makeLine("Composition: Each 21 gm pack contains: Sodium Chloride IP 2.6g Potassium Chloride IP 1.5g", { height: 3, relativeHeight: 0.75, y: 80 }),
+      ];
+      const candidates = extractFieldCandidates(lines, ["batch_number"]);
+      const validBatchCands = candidates.filter((c) => c.field === "batch_number" && c.value);
+      expect(validBatchCands.length).toBe(0);
     });
   });
 

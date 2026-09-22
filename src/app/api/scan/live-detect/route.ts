@@ -6,7 +6,7 @@ import { extractFieldCandidates } from "@/services/field-extraction";
 import {
   normalizeMRP, normalizeNetQuantity, normalizeDate,
   normalizeManufacturer, normalizeProductName, normalizeCountryOfOrigin,
-  normalizeConsumerCare,
+  normalizeConsumerCare, normalizeBatchNumber,
 } from "@/services/normalizer";
 import type { DeclarationField } from "@/domain/inspection";
 
@@ -114,6 +114,7 @@ export async function POST(request: NextRequest) {
           case "consumer_care": return normalizeConsumerCare(text);
           case "country_of_origin": return normalizeCountryOfOrigin(text);
           case "unit_sale_price": return normalizeMRP(text);
+          case "batch_number": return normalizeBatchNumber(text);
           default: return text.trim() || null;
         }
       };

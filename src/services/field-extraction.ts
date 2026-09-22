@@ -16,6 +16,7 @@ import {
   normalizeManufacturer,
   normalizeConsumerCare,
   normalizeCountryOfOrigin,
+  normalizeBatchNumber,
 } from "@/services/normalizer";
 import { matchAnchor, bestFuzzyMatch, tokenize } from "@/services/fuzzy-match";
 import { lookupProduct, type GazetteerProduct } from "@/services/gazetteer";
@@ -63,7 +64,7 @@ const FIELD_ANCHORS: Record<DeclarationField, string[]> = {
   unit_sale_price: ["Sale Price", "Retail Price"],
   dimensions: ["Dimensions", "Size", "Pack Size", "Measurement"],
   best_before: ["Best Before", "Use By", "Expiry", "Exp", "Shelf Life"],
-  batch_number: ["Batch", "Lot", "B.No", "Batch No", "Lot No"],
+  batch_number: ["Batch No", "Lot No", "B.No", "Batch", "Lot"],
   other: [],
 };
 
@@ -363,9 +364,9 @@ function passesPlausibilityGate(
     return { passes: false, reason: "empty value" };
   }
 
-  // Numeric fields: normalizer already validated, just check length
-  if (["mrp", "net_quantity", "date", "unit_sale_price"].includes(field)) {
-    if (value.length > 50) return { passes: false, reason: "numeric value too long" };
+  // Numeric and code fields: normalizer already validated, just check length
+  if (["mrp", "net_quantity", "date", "unit_sale_price", "batch_number"].includes(field)) {
+    if (value.length > 50) return { passes: false, reason: "numeric/code value too long" };
     return { passes: true };
   }
 
@@ -416,6 +417,15 @@ function passesPlausibilityGate(
     }
   }
 
+  if (field === "batch_number") {
+    if (cleaned.length > 35) {
+      return { passes: false, reason: "batch number candidate exceeds maximum 35 characters" };
+    }
+    if (/\b(?:composition|contains|ingredients|sodium|chloride|dextrose|excipients|mfg|manufactured|marketed)\b/i.test(cleaned)) {
+      return { passes: false, reason: "batch number candidate contains composition or ingredient prose" };
+    }
+  }
+
   return { passes: true };
 }
 
@@ -431,7 +441,7 @@ function normalizeFieldFromLine(field: DeclarationField, text: string): string |
     case "unit_sale_price": return normalizeMRP(text);
     case "dimensions": return text.trim() || null;
     case "best_before": return normalizeDate(text);
-    case "batch_number": { const c = text.trim(); return c && !/^\d{12,14}$/.test(c.replace(/\s+/g, "")) ? c : null; }
+    case "batch_number": return normalizeBatchNumber(text);
     default: return text.trim() || null;
   }
 }

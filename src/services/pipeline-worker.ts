@@ -49,6 +49,7 @@ import {
   normalizeManufacturer,
   normalizeProductName,
   normalizeCountryOfOrigin,
+  normalizeBatchNumber,
   parseConsumerCareDetails,
 } from "@/services/normalizer";
 
@@ -136,7 +137,7 @@ function normalizeFieldValue(field: DeclarationField, raw: string): string | nul
       result = normalizeDate(text);
       break;
     case "batch_number":
-      result = text.trim() || null;
+      result = normalizeBatchNumber(text);
       break;
     default:
       result = text.trim() || null;

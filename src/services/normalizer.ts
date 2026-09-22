@@ -530,3 +530,52 @@ export function normalizeCountryOfOrigin(raw: string): string | null {
 
   return null;
 }
+
+/**
+ * Normalize batch / lot number declaration.
+ * Accepts: "Batch No: B2X4501", "B.No. ORS-2409", "LOT 89201", "B2X4501", "B.No. C24108"
+ * Rejects: Composition paragraphs, ingredient lists, instructions, marketing callouts,
+ *          or prose strings without a distinct batch code.
+ */
+export function normalizeBatchNumber(raw: string): string | null {
+  let cleaned = cleanText(raw);
+  if (!cleaned || cleaned.length < 2) return null;
+
+  // 1. Strip leading anchor fragments like "No:", "No.", ":", "-"
+  cleaned = cleaned.replace(/^(?:no\.?|lot\.?|b\.?no\.?|batch\s*no\.?)\s*[:.-]?\s*/i, "").trim();
+  cleaned = cleaned.replace(/^[:.-]+\s*/, "").trim();
+
+  if (!cleaned || cleaned.length < 2) return null;
+
+  // 2. Reject composition, ingredient, nutritional, and storage/instructional paragraphs
+  const invalidKeywords = /\b(?:composition|contains|ingredients|excipients|sodium|chloride|potassium|dextrose|citrate|hydrate|anhydrous|store\s+in|dry\s+place|dosage|direction|keep\s+out|warning|caution|mfg|licence|license|fssai|marketed|manufactured)\b/i;
+  if (invalidKeywords.test(cleaned)) {
+    return null;
+  }
+
+  // 3. Extract batch code after explicit prefix if present
+  const prefixMatch = cleaned.match(/(?:b\.?no\.?|batch\s*(?:no\.?)?|lot\s*(?:no\.?)?)\s*[:.-]?\s*([a-zA-Z0-9/-]{2,25})/i);
+  if (prefixMatch) {
+    const code = prefixMatch[1].trim();
+    if (code.length >= 2 && /[a-zA-Z0-9]/.test(code) && !invalidKeywords.test(code)) {
+      return code;
+    }
+  }
+
+  // 4. Reject strings longer than 35 chars if no clean code was found
+  if (cleaned.length > 35) {
+    return null;
+  }
+
+  // 5. Standalone batch string check: must be a short alphanumeric code (e.g., "B2X4501", "L89201", "ORS-2409")
+  const isCodeLike = /^[a-zA-Z0-9/#\s.-]{2,25}$/.test(cleaned) &&
+    /[a-zA-Z0-9]/.test(cleaned) &&
+    !/^(the|and|for|with|each|pack|this|item|g|gm|kg|ml)$/i.test(cleaned);
+
+  if (isCodeLike) {
+    return cleaned.replace(/^[:.-]+/, "").trim();
+  }
+
+  return null;
+}
+

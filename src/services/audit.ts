@@ -17,10 +17,13 @@ export type AuditAction =
   | "LOGIN"
   | "LOGOUT"
   | "INSPECTION_CREATED"
+  | "INSPECTION_SUBMITTED"
   | "EVIDENCE_UPLOADED"
   | "ANALYSIS_STARTED"
   | "ANALYSIS_COMPLETED"
   | "MANUAL_OVERRIDE"
+  | "VERDICT_APPROVED"
+  | "VERDICT_REJECTED"
   | "REPORT_GENERATED";
 
 export type AuditEntityType = "INSPECTION" | "USER" | "RULE" | "EVIDENCE" | "REPORT";
@@ -87,6 +90,26 @@ export async function getAuditLogsForInspection(inspectionId: string) {
     });
   } catch (err) {
     console.error("[AuditService] Failed to fetch audit logs for inspection:", err);
+    return [];
+  }
+}
+
+export async function getAllAuditLogs(limit = 100) {
+  try {
+    return await prisma.auditLog.findMany({
+      include: {
+        user: {
+          select: { id: true, username: true, name: true, role: true, badgeNumber: true },
+        },
+        organization: {
+          select: { id: true, code: true, name: true },
+        },
+      },
+      orderBy: { timestamp: "desc" },
+      take: limit,
+    });
+  } catch (err) {
+    console.error("[AuditService] Failed to fetch system audit logs:", err);
     return [];
   }
 }

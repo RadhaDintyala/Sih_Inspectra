@@ -1,15 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateUser, createSessionToken, SESSION_COOKIE_NAME } from "@/services/auth";
 import { logAuditEvent } from "@/services/audit";
+import { checkRateLimit } from "@/lib/rate-limiter";
 
 export async function POST(request: NextRequest) {
   try {
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "127.0.0.1";
+    const rateLimit = checkRateLimit(`login_${ip}`, 10, 60_000); // 10 attempts per minute
+
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: "Too many login attempts. Please try again after 60 seconds.", statusCode: 429 },
+        { status: 429, headers: { "Retry-After": "60" } }
+      );
+    }
+
     const body = await request.json().catch(() => ({}));
     const { username, password } = body as { username?: string; password?: string };
 
     if (!username || !password) {
       return NextResponse.json(
-        { error: "Username and password are required." },
+        { error: "Username and password are required.", statusCode: 400 },
         { status: 400 },
       );
     }
@@ -18,7 +29,7 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       return NextResponse.json(
-        { error: "Invalid credentials. Please check your username and password." },
+        { error: "Invalid credentials. Please check your username and password.", statusCode: 401 },
         { status: 401 },
       );
     }

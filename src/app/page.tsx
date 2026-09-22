@@ -35,10 +35,11 @@ import { useRole } from "@/context/RoleContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { compressAndDownscaleImage } from "@/services/image-compression";
 import { startSyncEngine } from "@/services/sync-engine";
+import { AuditLogView } from "@/components/AuditLogView";
+import { ReviewerQueueView } from "@/components/ReviewerQueueView";
+import { ForbiddenView } from "@/components/ForbiddenView";
 
-type View = "home" | "dashboard" | "scan" | "result" | "history" | "rules";
-
-
+type View = "home" | "dashboard" | "scan" | "result" | "history" | "rules" | "audit_logs" | "reviewer_queue";
 
 function newInspection() {
   return {
@@ -53,7 +54,7 @@ function newInspection() {
 }
 
 export default function Home() {
-  const { user, role, isAuthenticated, isLoadingAuth, login, logout, isAdmin } = useRole();
+  const { user, role, isAuthenticated, isLoadingAuth, login, logout, isAdmin, isOfficer, isReviewer } = useRole();
   const [view, setView] = useState<View>("scan");
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [phase, setPhase] = useState<AnalysisPhase>("image");
@@ -96,11 +97,13 @@ export default function Home() {
       initialViewSetRef.current = true;
       if (isAdmin) {
         setView("dashboard");
+      } else if (isReviewer) {
+        setView("reviewer_queue");
       } else {
         startInspection();
       }
     }
-  }, [isAuthenticated, isAdmin]);
+  }, [isAuthenticated, isAdmin, isReviewer]);
 
   const fetchHistory = useCallback(async () => {
     setIsLoadingHistory(true);
@@ -461,6 +464,8 @@ export default function Home() {
           login(loggedInUser);
           if (loggedInUser.role === "admin") {
             setView("dashboard");
+          } else if (loggedInUser.role === "reviewer") {
+            setView("reviewer_queue");
           } else {
             startInspection();
           }
@@ -481,10 +486,10 @@ export default function Home() {
           </span>
           <div>
             <span style={{ display: "block", fontWeight: 700, fontSize: "14px", lineHeight: 1.2 }}>
-              {isAdmin ? "Inspectra Admin" : "Inspectra Officer"}
+              {isAdmin ? "Inspectra Admin" : isReviewer ? "Inspectra Reviewer" : "Inspectra Officer"}
             </span>
             <small style={{ fontSize: "8.5px", color: "var(--ink-muted)", letterSpacing: "0.08em" }}>
-              {isAdmin ? "CONTROL CENTER" : "FIELD CONSOLE"}
+              {isAdmin ? "CONTROL CENTER" : isReviewer ? "REVIEW CONSOLE" : "FIELD CONSOLE"}
             </small>
           </div>
         </div>
@@ -492,7 +497,7 @@ export default function Home() {
         <div style={{ padding: "0 12px 8px" }}>
           <span className={`portal-indicator-banner ${role}`}>
             {isAdmin ? <ShieldCheck size={12} /> : <UserCheck size={12} />}
-            {isAdmin ? "Admin Console" : "Officer Portal"}
+            {isAdmin ? "Admin Console" : isReviewer ? "Reviewer Console" : "Officer Portal"}
           </span>
         </div>
 
@@ -503,6 +508,9 @@ export default function Home() {
               <button className={navCls("dashboard")} onClick={() => { fetchHistory(); setView("dashboard"); }}>
                 <LayoutDashboard size={17} /> Analytics Dashboard
               </button>
+              <button className={navCls("audit_logs")} onClick={() => setView("audit_logs")}>
+                <ClipboardCheck size={17} /> Audit Logs Access
+              </button>
               <button className={navCls("rules")} onClick={() => setView("rules")}>
                 <ShieldCheck size={17} /> Rules Administration
               </button>
@@ -511,6 +519,18 @@ export default function Home() {
               </button>
               <button className={inspectNav} onClick={() => (inspection ? setView(inspection.status === "processing" ? "scan" : "result") : startInspection())}>
                 <Camera size={17} /> Field Scanner
+              </button>
+            </>
+          ) : isReviewer ? (
+            <>
+              <button className={navCls("reviewer_queue")} onClick={() => { fetchHistory(); setView("reviewer_queue"); }}>
+                <ClipboardCheck size={17} /> Assigned Queue
+              </button>
+              <button className={navCls("history")} onClick={() => { fetchHistory(); setView("history"); }}>
+                <History size={17} /> Inspection Archive <span className="nav-count">{savedInspections.length}</span>
+              </button>
+              <button className={navCls("rules")} onClick={() => setView("rules")}>
+                <ShieldCheck size={17} /> Rules Reference
               </button>
             </>
           ) : (
@@ -554,12 +574,16 @@ export default function Home() {
             <Menu size={20} />
           </button>
           <div className="breadcrumb">
-            {isAdmin ? "Admin Control Center" : "Officer Enforcement Console"} <ChevronRight size={14} />{" "}
+            {isAdmin ? "Admin Control Center" : isReviewer ? "Reviewer Verification Console" : "Officer Enforcement Console"} <ChevronRight size={14} />{" "}
             <strong>
               {view === "home"
                 ? "Overview"
                 : view === "dashboard"
                 ? "Analytics Dashboard"
+                : view === "audit_logs"
+                ? "Audit Logs Access"
+                : view === "reviewer_queue"
+                ? "Assigned Queue"
                 : view === "scan"
                 ? "Package Scanner"
                 : view === "result"
@@ -575,7 +599,7 @@ export default function Home() {
             </span>
             <span className={`role-badge ${role}`}>
               {isAdmin ? <ShieldCheck size={12} /> : <UserCheck size={12} />}
-              {isAdmin ? "Administrator" : "Enforcement Officer"}
+              {isAdmin ? "Administrator" : isReviewer ? "Reviewer" : "Enforcement Officer"}
             </span>
           </div>
         </header>
@@ -604,6 +628,23 @@ export default function Home() {
                   setView("result");
                 }}
               />
+            )}
+            {view === "audit_logs" && (
+              isAdmin ? <AuditLogView /> : <ForbiddenView message="You don't have permission to access administrator security audit logs." onReturnDashboard={() => setView("scan")} />
+            )}
+            {view === "reviewer_queue" && (
+              (isReviewer || isAdmin) ? (
+                <ReviewerQueueView
+                  inspections={savedInspections}
+                  isLoading={isLoadingHistory}
+                  onSelectInspection={(item) => {
+                    setInspection(item);
+                    setView("result");
+                  }}
+                />
+              ) : (
+                <ForbiddenView message="You don't have permission to view the reviewer queue." onReturnDashboard={() => setView("scan")} />
+              )
             )}
             {view === "scan" && (
               <ScanView

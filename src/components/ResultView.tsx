@@ -287,9 +287,16 @@ export function ResultView({
   const productName = inspection.productName || "Packaged Commodity";
 
   const detectedDeclarations = useMemo(() => {
-    return (inspection.declarations || []).filter(
-      (decl) => decl.status === "DETECTED" && decl.value && decl.value.trim().length > 0
-    );
+    const map = new Map<string, Declaration>();
+    for (const decl of inspection.declarations || []) {
+      if (decl.status === "DETECTED" && decl.value && decl.value.trim().length > 0) {
+        const existing = map.get(decl.field);
+        if (!existing || (decl.confidence ?? 0) > (existing.confidence ?? 0)) {
+          map.set(decl.field, decl);
+        }
+      }
+    }
+    return Array.from(map.values());
   }, [inspection.declarations]);
 
   return (
@@ -319,6 +326,122 @@ export function ResultView({
           )}
           {checksByStatus.notEvaluated.length > 0 && (
             <span className="rv-vb-c rv-vb-c-ne">{checksByStatus.notEvaluated.length} Not Evaluated</span>
+          )}
+        </div>
+      </div>
+
+      {/* ── Reviewer Verdict Action Bar (Approve / Reject) & Officer Submit ─────── */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          backgroundColor: role === "reviewer" ? "rgba(245, 158, 11, 0.08)" : "rgba(37, 99, 235, 0.06)",
+          border: role === "reviewer" ? "1px solid rgba(245, 158, 11, 0.3)" : "1px solid rgba(37, 99, 235, 0.2)",
+          padding: "12px 18px",
+          borderRadius: "8px",
+          margin: "14px 0",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <ShieldCheck size={20} style={{ color: role === "reviewer" ? "#f59e0b" : "#2563eb" }} />
+          <div>
+            <strong style={{ fontSize: "14px", display: "block" }}>
+              {role === "reviewer"
+                ? "Reviewer Decision Console"
+                : role === "admin"
+                ? "Administrator Verdict Override"
+                : "Officer Inspection Workflow"}
+            </strong>
+            <small style={{ fontSize: "11px", color: "var(--muted)" }}>
+              {role === "reviewer"
+                ? "Inspect OCR outputs and issue official statutory verdict (Approve / Reject)."
+                : role === "admin"
+                ? "Admin oversight console to review and finalize verdicts."
+                : "Complete scan details and submit for reviewer verification."}
+            </small>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          {/* Officer Submit Button */}
+          {(role === "officer" || role === "ENFORCEMENT_OFFICER") && (
+            <button
+              type="button"
+              className="button primary"
+              style={{ fontSize: "12px", padding: "8px 16px", backgroundColor: "#2563eb", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: 600 }}
+              onClick={async () => {
+                try {
+                  const res = await fetch(`/api/inspections/${inspection.id}/submit`, { method: "POST" });
+                  if (res.ok) {
+                    const data = await res.json();
+                    if (data.inspection && onInspectionUpdated) onInspectionUpdated(data.inspection);
+                    alert(`Inspection "${inspection.id}" successfully submitted to Reviewer queue!`);
+                  }
+                } catch {
+                  alert("Failed to submit inspection for review.");
+                }
+              }}
+            >
+              Submit Inspection for Review
+            </button>
+          )}
+
+          {/* Reviewer / Admin Approve & Reject Buttons */}
+          {(role === "reviewer" || role === "admin") && (
+            <>
+              <button
+                type="button"
+                className="button primary"
+                style={{ fontSize: "12px", padding: "8px 16px", backgroundColor: "#10b981", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: 700 }}
+                onClick={async () => {
+                  const rationale = prompt("Enter official approval notes / rationale:", "Statutory declarations verified & compliant with Legal Metrology Rules, 2011.");
+                  if (!rationale) return;
+                  try {
+                    const res = await fetch(`/api/inspections/${inspection.id}/verdict`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ decision: "APPROVE", rationale }),
+                    });
+                    if (res.ok) {
+                      const data = await res.json();
+                      if (data.inspection && onInspectionUpdated) onInspectionUpdated(data.inspection);
+                      alert(`Verdict APPROVED for inspection ${inspection.id}.`);
+                    }
+                  } catch {
+                    alert("Failed to record verdict decision.");
+                  }
+                }}
+              >
+                Approve Inspection
+              </button>
+
+              <button
+                type="button"
+                className="button secondary"
+                style={{ fontSize: "12px", padding: "8px 16px", backgroundColor: "#ef4444", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: 700 }}
+                onClick={async () => {
+                  const rationale = prompt("Enter non-compliance violation grounds for rejection:", "Non-compliance detected under Legal Metrology Rules 2011.");
+                  if (!rationale) return;
+                  try {
+                    const res = await fetch(`/api/inspections/${inspection.id}/verdict`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ decision: "REJECT", rationale }),
+                    });
+                    if (res.ok) {
+                      const data = await res.json();
+                      if (data.inspection && onInspectionUpdated) onInspectionUpdated(data.inspection);
+                      alert(`Verdict REJECTED for inspection ${inspection.id}. Violation logged.`);
+                    }
+                  } catch {
+                    alert("Failed to record verdict decision.");
+                  }
+                }}
+              >
+                Reject Item (Issue Violation)
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -731,6 +854,8 @@ export function ResultView({
           )}
         </section>
       )}
+
+
 
       {/* ── Compliance Results (Rule Checklist) ───────────────────── */}
       {!isInvalidEvidence && inspection.checks.length > 0 && (

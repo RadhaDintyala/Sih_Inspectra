@@ -64,10 +64,69 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
 
         <div className="login-form-container">
           <div className="login-instructions">
-            <h2>Authorized Access Only</h2>
+            <h2>Authorized Portal Access</h2>
             <p>
-              Sign in with your official enforcement officer or system administrator credentials to access inspection consoles.
+              Select your role or enter credentials to access your designated workflow.
             </p>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", margin: "16px 0 20px" }}>
+              <button
+                type="button"
+                className="button secondary"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  padding: "10px 6px",
+                  border: username === "admin" ? "2px solid #3b82f6" : "1px solid var(--border)",
+                  backgroundColor: username === "admin" ? "rgba(59, 130, 246, 0.08)" : "transparent",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                }}
+                onClick={() => { setUsername("admin"); setPassword("admin123"); }}
+              >
+                <span style={{ fontWeight: 700, fontSize: "12px", color: "var(--fg)" }}>Admin</span>
+                <small style={{ fontSize: "10px", color: "var(--muted)", marginTop: "2px" }}>Audit & Oversight</small>
+              </button>
+
+              <button
+                type="button"
+                className="button secondary"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  padding: "10px 6px",
+                  border: username === "officer" ? "2px solid #10b981" : "1px solid var(--border)",
+                  backgroundColor: username === "officer" ? "rgba(16, 185, 129, 0.08)" : "transparent",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                }}
+                onClick={() => { setUsername("officer"); setPassword("officer123"); }}
+              >
+                <span style={{ fontWeight: 700, fontSize: "12px", color: "var(--fg)" }}>Officer</span>
+                <small style={{ fontSize: "10px", color: "var(--muted)", marginTop: "2px" }}>Scan & Submit</small>
+              </button>
+
+              <button
+                type="button"
+                className="button secondary"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  padding: "10px 6px",
+                  border: username === "reviewer" ? "2px solid #f59e0b" : "1px solid var(--border)",
+                  backgroundColor: username === "reviewer" ? "rgba(245, 158, 11, 0.08)" : "transparent",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                }}
+                onClick={() => { setUsername("reviewer"); setPassword("reviewer123"); }}
+              >
+                <span style={{ fontWeight: 700, fontSize: "12px", color: "var(--fg)" }}>Reviewer</span>
+                <small style={{ fontSize: "10px", color: "var(--muted)", marginTop: "2px" }}>Inspect & Approve</small>
+              </button>
+            </div>
           </div>
 
           {errorMsg && (
@@ -87,7 +146,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
                 type="text"
                 autoComplete="username"
                 autoFocus
-                placeholder="e.g. officer or admin"
+                placeholder="e.g. officer, reviewer, or admin"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 disabled={isLoading}

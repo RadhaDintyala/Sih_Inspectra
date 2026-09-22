@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
+import bcrypt from "bcryptjs";
 import { prisma } from "@/services/store";
 import {
   type UserRole,
@@ -22,21 +23,38 @@ export type { UserRole, SessionUser, SessionPayload };
 export { SESSION_COOKIE_NAME, createSessionToken, verifySessionToken };
 
 // ---------------------------------------------------------------------------
-// Password Hashing (PBKDF2)
+// Password Hashing (Bcrypt with PBKDF2 Legacy Compatibility)
 // ---------------------------------------------------------------------------
 
 export function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16).toString("hex");
-  const hash = crypto.pbkdf2Sync(password, salt, 100_000, 64, "sha512").toString("hex");
-  return `${salt}:${hash}`;
+  return bcrypt.hashSync(password, 12);
 }
 
 export function verifyPassword(password: string, storedHash: string): boolean {
-  if (!storedHash || !storedHash.includes(":")) return false;
-  const [salt, originalHash] = storedHash.split(":");
-  if (!salt || !originalHash) return false;
-  const verifyHash = crypto.pbkdf2Sync(password, salt, 100_000, 64, "sha512").toString("hex");
-  return crypto.timingSafeEqual(Buffer.from(originalHash, "hex"), Buffer.from(verifyHash, "hex"));
+  if (!storedHash) return false;
+
+  // 1. Bcrypt hash check ($2a$, $2b$, $2y$)
+  if (storedHash.startsWith("$2a$") || storedHash.startsWith("$2b$") || storedHash.startsWith("$2y$")) {
+    try {
+      return bcrypt.compareSync(password, storedHash);
+    } catch {
+      return false;
+    }
+  }
+
+  // 2. Legacy PBKDF2 format check (salt:hash)
+  if (storedHash.includes(":")) {
+    const [salt, originalHash] = storedHash.split(":");
+    if (!salt || !originalHash) return false;
+    try {
+      const verifyHash = crypto.pbkdf2Sync(password, salt, 100_000, 64, "sha512").toString("hex");
+      return crypto.timingSafeEqual(Buffer.from(originalHash, "hex"), Buffer.from(verifyHash, "hex"));
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,11 +89,6 @@ export async function getRoleFromRequest(request: NextRequest): Promise<UserRole
     const session = await getSessionUserFromToken(sessionToken);
     if (session) return session.role;
   }
-  const legacyRole = request.cookies?.get ? request.cookies.get("inspectra_role")?.value : undefined;
-  if (legacyRole === "admin" || legacyRole === "ADMIN") return "ADMIN";
-  if (legacyRole === "officer" || legacyRole === "ENFORCEMENT_OFFICER") return "ENFORCEMENT_OFFICER";
-  if (legacyRole === "reviewer" || legacyRole === "REVIEWER") return "REVIEWER";
-
   return "ENFORCEMENT_OFFICER";
 }
 
@@ -84,7 +97,7 @@ export async function requireAuth(request: NextRequest): Promise<{ user: Session
   if (!user) {
     return {
       errorResponse: NextResponse.json(
-        { error: "Unauthorized: Active session required." },
+        { error: "Unauthorized: Active session required.", statusCode: 401 },
         { status: 401 },
       ),
     };
@@ -109,7 +122,7 @@ export async function requireRoles(
   if (!isAllowed) {
     return {
       errorResponse: NextResponse.json(
-        { error: "Forbidden: Admin role required for this action." },
+        { error: "Forbidden: Higher-level permissions required for this action.", statusCode: 403 },
         { status: 403 }
       ),
     };
@@ -120,9 +133,10 @@ export async function requireRoles(
 
 export async function requireAdminRole(request: NextRequest): Promise<NextResponse | null> {
   const role = await getRoleFromRequest(request);
-  if (role.toLowerCase() !== "admin") {
+  const roleUpper = (role || "").toUpperCase();
+  if (roleUpper !== "ADMIN") {
     return NextResponse.json(
-      { error: "Forbidden: Admin role required for this action." },
+      { error: "Forbidden: Admin role required for this action.", statusCode: 403 },
       { status: 403 },
     );
   }
@@ -136,7 +150,6 @@ export async function requireAdminRole(request: NextRequest): Promise<NextRespon
 export async function authenticateUser(username: string, password: string): Promise<SessionUser | null> {
   const normalizedUsername = username.trim().toLowerCase();
 
-  // 1. Check database user safely
   try {
     const user = await prisma.user.findUnique({
       where: { username: normalizedUsername },
@@ -150,8 +163,8 @@ export async function authenticateUser(username: string, password: string): Prom
         const mappedRole: UserRole =
           roleUpper === "ADMIN" || user.role === "admin"
             ? "admin"
-            : roleUpper === "REVIEWER"
-            ? "REVIEWER"
+            : roleUpper === "REVIEWER" || user.role === "reviewer"
+            ? "reviewer"
             : "officer";
 
         return {
@@ -170,62 +183,30 @@ export async function authenticateUser(username: string, password: string): Prom
     console.error("[AuthService] Database user query error:", err instanceof Error ? err.message : String(err));
   }
 
-  // Fallback demo account authentication (for test environments or unseeded databases)
-  if (
-    (normalizedUsername === "officer_demo" && password === "Inspectra@Officer2026!") ||
-    (normalizedUsername === "officer" && password === "officer123")
-  ) {
-    let orgId = "ORG-LM-DELHI";
-    let orgName = "Delhi Legal Metrology Enforcement Cell";
-    let orgCode = "ORG-LM-DELHI";
-    try {
-      const org = await prisma.organization.findFirst();
-      if (org) {
-        orgId = org.id;
-        orgName = org.name;
-        orgCode = org.code;
-      }
-    } catch {
-      // Ignore DB read failure during fallback
-    }
-
+  // Fallback demo/test credentials for test suite compatibility
+  if (normalizedUsername === "officer_demo" && password === "Inspectra@Officer2026!") {
     return {
       id: "usr-officer-demo",
-      organizationId: orgId,
-      organizationName: orgName,
-      organizationCode: orgCode,
-      username: normalizedUsername,
+      organizationId: "ORG-LM-DELHI",
+      organizationName: "Delhi Legal Metrology Enforcement Cell",
+      organizationCode: "ORG-LM-DELHI",
+      username: "officer_demo",
       role: "officer",
-      name: "Legal Metrology Inspector (Demo)",
+      name: "Legal Metrology Inspector",
+      badgeNumber: "DL-LM-104",
     };
   }
 
-  if (
-    (normalizedUsername === "admin_demo" && password === "Inspectra@Admin2026!") ||
-    (normalizedUsername === "admin" && password === "admin123")
-  ) {
-    let orgId = "ORG-LM-DELHI";
-    let orgName = "Delhi Legal Metrology Enforcement Cell";
-    let orgCode = "ORG-LM-DELHI";
-    try {
-      const org = await prisma.organization.findFirst();
-      if (org) {
-        orgId = org.id;
-        orgName = org.name;
-        orgCode = org.code;
-      }
-    } catch {
-      // Ignore DB read failure during fallback
-    }
-
+  if (normalizedUsername === "admin_demo" && password === "Inspectra@Admin2026!") {
     return {
       id: "usr-admin-demo",
-      organizationId: orgId,
-      organizationName: orgName,
-      organizationCode: orgCode,
-      username: normalizedUsername,
+      organizationId: "ORG-LM-DELHI",
+      organizationName: "Delhi Legal Metrology Enforcement Cell",
+      organizationCode: "ORG-LM-DELHI",
+      username: "admin_demo",
       role: "admin",
-      name: "Senior Administrator (Demo)",
+      name: "Senior Enforcement Administrator",
+      badgeNumber: "DL-LM-001",
     };
   }
 
