@@ -411,12 +411,25 @@ export async function processInspectionPipeline(job: PipelineJob): Promise<Inspe
     for (const field of TARGET_FIELDS) {
       const declMatch = batchResult.declarations.find((d) => d.field === field);
       if (declMatch && (declMatch.status === "DETECTED" || declMatch.status === "CONFLICT") && declMatch.value) {
+        const isConflict = declMatch.status === "CONFLICT" || Boolean((declMatch as any).conflict);
+        const normalizedVal = isConflict ? declMatch.value : normalizeFieldValue(field, declMatch.value);
+        if (!normalizedVal) {
+          declarations.push({
+            field,
+            value: null,
+            status: "NOT_DETECTED",
+            confidence: null,
+            evidenceImageId: evidenceImages[0]?.id,
+          });
+          continue;
+        }
+
         // Find matching source image id
         let sourceImgId = declMatch.sourceImageId || evidenceImages[0]?.id;
         const matchingEv = evidenceImages.find((ev) => sourceImgId.includes(ev.id) || ev.id.includes(sourceImgId));
         if (matchingEv) sourceImgId = matchingEv.id;
 
-        const mappedCandidates = (declMatch.candidates || [{ value: declMatch.value, sourceImageId: sourceImgId, rawValue: declMatch.rawValue }]).map((c: any) => {
+        const mappedCandidates = (declMatch.candidates || [{ value: normalizedVal, sourceImageId: sourceImgId, rawValue: declMatch.rawValue }]).map((c: any) => {
           let cSourceId = c.sourceImageId || sourceImgId;
           const matchC = evidenceImages.find((ev) => cSourceId.includes(ev.id) || ev.id.includes(cSourceId));
           if (matchC) cSourceId = matchC.id;
@@ -433,9 +446,7 @@ export async function processInspectionPipeline(job: PipelineJob): Promise<Inspe
 
         declarations.push({
           field,
-          value: field === "date" && declMatch.status === "DETECTED"
-            ? (normalizeDate(declMatch.value) ?? declMatch.value)
-            : declMatch.value,
+          value: normalizedVal,
           rawValue: declMatch.rawValue || declMatch.value,
           status: declMatch.status as Declaration["status"],
           conflict: (declMatch.status as string) === "CONFLICT" || Boolean((declMatch as any).conflict),
@@ -517,7 +528,7 @@ export async function processInspectionPipeline(job: PipelineJob): Promise<Inspe
     console.log(`[DETERM] stage=VERDICT verdict=${verdict} status=${status} score=${score}`);
 
     const extractedProd = declarations.find((d) => d.field === "product_name")?.value;
-    const productName = extractedProd && extractedProd.trim() ? extractedProd : "Packaged Commodity";
+    const productName = extractedProd && extractedProd.trim() ? extractedProd : "Not detected";
 
     const completedInspection: Inspection = {
       id: inspectionId,

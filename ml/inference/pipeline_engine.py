@@ -734,6 +734,38 @@ def extract_product_name(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
         full_title = " ".join(name_parts)
         full_title = re.sub(r'\s+', ' ', full_title).strip()
         avg_conf = round(sum(matched_confidences) / len(matched_confidences), 3)
+
+        # ── Strict Product Name Plausibility Validation ───────────────────
+        letters_only = re.sub(r'[^a-zA-Z]', '', full_title)
+        alphanum_only = re.sub(r'[^a-zA-Z0-9]', '', full_title)
+        
+        # Must have at least 2 letters
+        if len(letters_only) < 2:
+            return None
+            
+        # Non-alphanumeric noise ratio check
+        if len(full_title) > 0 and len(alphanum_only) / float(len(full_title)) < 0.6:
+            return None
+            
+        # Reject pure statutory/stop words
+        pure_stop_words = {
+            "mrp", "net", "wt", "qty", "weight", "quantity", "mfg", "pkd", "exp",
+            "date", "ltd", "pvt", "pack", "name", "lic", "no", "fssai", "batch",
+            "lot", "in", "by", "for", "of", "and", "the", "rs", "inr", "price",
+            "product", "details", "address", "email", "phone", "info"
+        }
+        words = [w.lower() for w in re.split(r'\s+', full_title) if w]
+        non_stop_words = [w for w in words if w not in pure_stop_words and len(w) >= 2]
+        
+        if not non_stop_words:
+            return None
+
+        # For 2-letter tokens (e.g., "A1"), require uppercase/titlecase and prominence
+        if len(letters_only) == 2 and len(words) == 1:
+            rel_h = top_line.get("relativeHeight", 1.0)
+            if rel_h < 1.4 and top_line["bbox"]["y"] > 50:
+                return None
+
         if full_title:
             return {
                 "field": "product_name",
@@ -1029,9 +1061,10 @@ def extract_date(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 def extract_manufacturer(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Extract Manufacturer / Packer details and registered address for any packaged commodity."""
     mfr_keywords = [
-        "marketed by", "manufactured by", "manufactured", "mfd by", "packed by",
-        "packedby", "packer", "produced by", "acked by", "ackedby", "cke by",
-        "&packed", "& packed", "manuf", "mfg by", "actuted", "actute",
+        "marketed by", "manufactured by", "manufactured for", "mfd by", "mfg by", "packed by",
+        "packedby", "packer", "produced by", "imported by", "mktd by", "acked by", "ackedby",
+        "cke by", "&packed", "& packed", "actuted", "actute", "manufacturer:", "packer:",
+        "importer:", "mfr by", "manufactured &", "manufactured and", "mfd. by", "mfg. by",
         "britannia industries", "hungerford", "kolkata-700017", "wadia enterprise",
         "parle products", "itc limited", "mondelez", "nestle india", "amul",
         "hindustan unilever", "tata consumer", "haldiram", "bikaji", "dabur", "marico",
@@ -1045,8 +1078,20 @@ def extract_manufacturer(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
     for i, l in enumerate(all_lines):
         t = l["text"]
         t_low = t.lower()
-        # Skip price, weight, date lines when searching for manufacturer
+        # Skip price, weight, date, and shelf-life / best-before phrases when searching for manufacturer
         if re.search(r'^\s*(?:mrp|m\.r\.p|rsp|rs\.?|₹|net\s*(?:wt|qty|weight|vol)|mfg|mfd|pkd|packed|exp|expiry)\b', t_low):
+            continue
+        if re.search(r'\b(?:mrp|m\.r\.p|rsp|rs\.?|₹|net\s*(?:wt|qty|weight|vol)|exp|expiry|best\s*before|shelf\s*life|use\s*by|use\s*within)\b', t_low):
+            continue
+        if re.search(r'\b(?:month|months|date|dt)\s+(?:of|from)\b', t_low):
+            continue
+        # Check if current line or adjacent lines carry date / shelf-life context
+        prev_t_low = all_lines[i - 1]["text"].lower() if i > 0 else ""
+        next_t_low = all_lines[i + 1]["text"].lower() if i + 1 < len(all_lines) else ""
+        has_adjacent_date = bool(re.search(r'\b(?:month|months|best\s*before|shelf\s*life|date|dt)\b', prev_t_low) or
+                                re.search(r'\b(?:month|months|best\s*before|shelf\s*life|date|dt)\b', next_t_low))
+        has_mfr_role = bool(re.search(r'\b(?:by|for|:\s*\w+)\b', t_low) or corp_pattern.search(t))
+        if has_adjacent_date and not has_mfr_role:
             continue
 
         is_mfr = any(k in t_low for k in mfr_keywords) or (bool(corp_pattern.search(t)) and len(t.split()) >= 2)
@@ -1062,7 +1107,7 @@ def extract_manufacturer(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
                     if next_l.get("imageId") != src_img:
                         break
                     next_t = next_l["text"]
-                    if re.search(r'consumer\s*care|mrp|net\s*wt|lic\s*no|regn|protein|fat|ingredients', next_t, re.IGNORECASE):
+                    if re.search(r'consumer\s*care|mrp|net\s*wt|lic\s*no|regn|protein|fat|ingredients|best\s*before|shelf\s*life|use\s*by|month\s*of\s*manufacture', next_t, re.IGNORECASE):
                         break
                     parts.append(next_t)
                     matched_boxes.append(next_l["bbox"])
@@ -1074,29 +1119,25 @@ def extract_manufacturer(all_lines: List[Dict[str, Any]]) -> Optional[Dict[str, 
 
             # Credibility gate: only emit a manufacturer declaration when the
             # assembled text carries BOTH a location signal (PIN/state) AND an
-            # entity or physical-address keyword. Garbled OCR fragments
-            # ("tactuted&P LASHMLCOM ckedBy: mgauru-550039,Karnataka") must NOT
-            # be treated as a declaration, otherwise the rules engine records a
-            # false finding (pass or fail) instead of an honest "could not read"
-            # review.
+            # entity or physical-address keyword.
             has_pin = bool(re.search(r'\b\d{5,6}\b', full_val))
             has_state = bool(re.search(
                 r'\b(?:karnataka|bangalore|bengaluru|mumbai|delhi|new\s*delhi|kolkata|'
                 r'chennai|hyderabad|pune|ahmedabad|gurgaon|noida|haryana|maharashtra|'
                 r'tamil\s*nadu|kerala|andhra|telangana|gujarat|rajasthan|punjab|'
-                r'uttar\s*pradesh|bihar|odisha|west\s*bengal|assam|goa)\b',
+                r'uttar\s*pradesh|bihar|odisha|west\s*bengal|assam|goa|india|pb|pb\.)\b',
                 full_val, re.IGNORECASE
             ))
             has_signal = bool(
                 corp_pattern.search(full_val)
                 or re.search(
                     r'\b(?:road|rd|street|st|lane|nagar|sector|phase|industrial\s*area|'
-                    r'midc|gidc|district|dist|village|taluk|post|opp|near|india)\b',
+                    r'midc|gidc|district|dist|village|taluk|post|opp|near|india|healthcare)\b',
                     full_val, re.IGNORECASE
                 )
             )
             if not ((has_pin or has_state) and has_signal):
-                return None
+                continue
 
             return {
                 "field": "manufacturer",
@@ -1184,7 +1225,7 @@ def extract_country_of_origin(all_lines: List[Dict[str, Any]]) -> Optional[Dict[
     """Extract Country of Origin."""
     for l in all_lines:
         t = l["text"]
-        if re.search(r'(?:country\s*of\s*origin|made\s*in|product\s*of)\s*[:.\-]?\s*(india|bharat)', t, re.IGNORECASE):
+        if re.search(r'(?:country\s*of\s*origin|made\s*in|product\s*of|manufactured\s*in|imported\s*from)\s*[:.\-]?\s*(india|bharat)', t, re.IGNORECASE):
             return {
                 "field": "country_of_origin",
                 "value": "India",
@@ -1196,8 +1237,8 @@ def extract_country_of_origin(all_lines: List[Dict[str, Any]]) -> Optional[Dict[
             }
 
     for l in all_lines:
-        t = l["text"].lower()
-        if any(c in t for c in ["bangalore", "kolkata", "west bengal", "karnataka", "mumbai", "delhi", "india", "pvt ltd"]):
+        t = l["text"]
+        if re.search(r'\b(?:made\s*in\s*india|product\s*of\s*india|country\s*of\s*origin\s*[:.\-]?\s*india)\b', t, re.IGNORECASE):
             return {
                 "field": "country_of_origin",
                 "value": "India",

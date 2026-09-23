@@ -199,14 +199,14 @@ describe("Field extraction — fuzzy anchors + gazetteer", () => {
 // ── Strict plausibility gate ─────────────────────────────────────────
 
 describe("Strict plausibility gate", () => {
-  it("rejects garbled product names", () => {
+  it("rejects garbled s", () => {
     expect(normalizeProductName("Bi REE 3d")).toBeNull();
     expect(normalizeProductName("A aN a yy")).toBeNull();
   });
   it("rejects noise-heavy text", () => {
     expect(normalizeProductName("!!!@@@###")).toBeNull();
   });
-  it("accepts valid product names", () => {
+  it("accepts valid s", () => {
     expect(normalizeProductName("Good Day Biscuits")).toBe("Good Day Biscuits");
   });
   it("accepts valid MRP", () => {

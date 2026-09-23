@@ -284,13 +284,13 @@ function validateManufacturer(value: string, declaration?: Declaration): { ok: b
   return { ok: true };
 }
 
-/** Product name: must be non-empty. */
+/** : must be non-empty. */
 function validateProductName(value: string): { ok: boolean; reason?: string } {
   if (!value.trim()) {
-    return { ok: false, reason: "Product name or commodity description could not be found." };
+    return { ok: false, reason: " or commodity description could not be found." };
   }
   if (value.trim().length < 3) {
-    return { ok: false, reason: "Product name is too short to be a valid commodity description." };
+    return { ok: false, reason: " is too short to be a valid commodity description." };
   }
   return { ok: true };
 }
@@ -747,7 +747,7 @@ function evaluateSingleRule(
       return {
         ...baseEvidence({
           status: "pass",
-          evidence: "Product name and retail price both present on the principal display panel.",
+          evidence: " and retail price both present on the principal display panel.",
           explanation: "Both the commodity name and retail sale price are detected on what is assessed as the principal display panel.",
           confidence: 0.8,
           evidenceImageId: productName.evidenceImageId ?? imageId,
@@ -758,7 +758,7 @@ function evaluateSingleRule(
       ...baseEvidence({
         status: "review",
         evidence: "Principal display panel presence uncertain.",
-        explanation: "Cannot confirm the product name and MRP are both on the principal display panel. Review visual evidence.",
+        explanation: "Cannot confirm the  and MRP are both on the principal display panel. Review visual evidence.",
         confidence: 0.5,
         evidenceImageId: imageId,
       }),

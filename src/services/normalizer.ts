@@ -381,6 +381,10 @@ export function normalizeManufacturer(raw: string): string | null {
   if (!cleaned || cleaned.length < 3) return null;
   // Reject pure numbers or FSSAI license numbers
   if (/^\d+$/.test(cleaned) || /^lic(?:ence)?\s*no/i.test(cleaned)) return null;
+  // Reject date / shelf-life phrases (e.g. "MONTHS FROM THE MONTH OF MANUFACTURE")
+  if (/\b(?:months?|date|dt)\s+(?:from|of)\b/i.test(cleaned)) return null;
+  if (/\b(?:best\s*before|shelf\s*life|use\s*by|use\s*within)\b/i.test(cleaned)) return null;
+  if (/\b(?:mfg|mfd|pkd|packed)\s+(?:date|dt|month|year)\b/i.test(cleaned)) return null;
   // Extract alphabetic tokens
   const alphaTokens = cleaned
     .split(/\s+/)
@@ -390,7 +394,16 @@ export function normalizeManufacturer(raw: string): string | null {
   // Need at least one word with ≥3 alpha chars
   const longTokens = alphaTokens.filter((t) => t.length >= 3);
   if (longTokens.length === 0) return null;
-  return cleaned;
+
+  // Clean leading/trailing delimiters (| : / - \ = ~) and stray single-char OCR noise
+  let result = cleaned
+    .replace(/^[\s|:/\-\\_=~]+/, "")
+    .replace(/[\s|:/\-\\_=~]+$/, "");
+
+  // If result starts with isolated single-char noise (e.g. "I a "), trim it
+  result = result.replace(/^(?:[a-zA-Z|]\s+){1,2}(?=[a-zA-Z]{3,})/i, "").trim();
+
+  return result || cleaned;
 }
 
 /**
@@ -406,16 +419,26 @@ export function normalizeProductName(raw: string): string | null {
   const cleaned = cleanText(raw);
   if (!cleaned || cleaned.length < 2) return null;
 
-  // Check that string contains alphabetic characters
+  // Check that string contains alphabetic characters (at least 2 letters)
   const letters = cleaned.replace(/[^a-zA-Z]/g, "");
-  if (letters.length < 3) return null;
+  if (letters.length < 2) return null;
 
   // Reject strings dominated by noise/symbols (> 40% non-alphanumeric)
   const alphaNum = cleaned.replace(/[^a-zA-Z0-9\s]/g, "");
   if (alphaNum.length / cleaned.length < 0.6) return null;
 
-  // Reject obvious date / license fragments
-  if (/^(?:\d{1,2}[/.-]\d{2,4}|lic|batch|b\.?no|lot)/i.test(cleaned)) return null;
+  // Reject obvious date / license / batch / statutory declaration lines
+  if (/^(?:\d{1,2}[/.-]\d{2,4}|lic|batch|b\.?no|lot|mrp|rs\.?|₹|net\s*(?:wt|qty|weight|vol)|mfg|mfd|pkd|exp|expiry|best\s*before|use\s*by|consumer\s*care|customer\s*care|made\s*in|country\s*of\s*origin|manufactured\s*by|marketed\s*by|packed\s*by)/i.test(cleaned)) {
+    return null;
+  }
+
+  // Reject statutory phrase patterns anywhere in string if string consists solely of statutory phrases
+  const STATUTORY_STOP_WORDS = new Set([
+    "mrp", "net", "wt", "qty", "weight", "quantity", "mfg", "mfd", "pkd", "packed", "exp", "expiry",
+    "date", "ltd", "pvt", "pack", "name", "lic", "no", "fssai", "batch", "lot", "in", "by", "for",
+    "of", "and", "the", "rs", "inr", "price", "product", "details", "address", "email", "phone",
+    "info", "made", "country", "origin", "consumer", "care", "customer", "helpline", "toll", "free"
+  ]);
 
   // Extract alphabetic word tokens
   const alphaTokens = cleaned
@@ -423,18 +446,17 @@ export function normalizeProductName(raw: string): string | null {
     .map((t) => t.replace(/[^a-zA-Z]/g, "").toLowerCase())
     .filter((t) => t.length >= 1);
 
-  // Need at least one alphabetic token
   if (alphaTokens.length === 0) return null;
 
-  // Path A: has a token from the known-words dictionary (≥4 letters)
-  const hasRealWord = alphaTokens.some((t) => t.length >= 4 && PRODUCT_NAME_WORDS.has(t));
+  // Check if ALL tokens are statutory/stop words
+  const nonStatutoryTokens = alphaTokens.filter((t) => !STATUTORY_STOP_WORDS.has(t));
+  if (nonStatutoryTokens.length === 0) return null;
 
-  // Path B: has a long purely-alphabetic token (≥4 letters) — captures brand names
-  // like "OREO", "MILO", "DANO", "JIMJAM", "Kurkure" that aren't in a generic word list.
-  // The 4-char minimum excludes 3-letter noise (OCR artifacts) while allowing
-  // 4-char brand names. The field-extraction relativeHeight gate provides the
-  // geometric evidence that this is actually a brand name and not body-text noise.
-  const hasBrandToken = alphaTokens.some((t) => t.length >= 4);
+  // Need at least one valid non-statutory brand/commodity token:
+  // - either in PRODUCT_NAME_WORDS dictionary (length >= 3), OR
+  // - a long brand token (length >= 4) that is purely alphabetic.
+  const hasRealWord = alphaTokens.some((t) => t.length >= 3 && PRODUCT_NAME_WORDS.has(t));
+  const hasBrandToken = nonStatutoryTokens.some((t) => t.length >= 4);
 
   if (!hasRealWord && !hasBrandToken) return null;
 
@@ -456,10 +478,10 @@ const PRODUCT_NAME_WORDS = new Set([
   "apple", "mango", "banana", "lemon", "ginger", "garlic", "onion", "tomato",
   "chicken", "fish", "meat", "egg", "paneer", "cheese", "yogurt", "curd",
   "sweet", "hot", "mild", "tasty", "delicious", "healthy",
-  "baby", "kids", "family", "happy", "joy", "love", "care", "life",
+  "baby", "kids", "family", "happy", "joy", "love", "life",
   "power", "energy", "active", "strong", "smart", "fast", "lite", "light",
   "super", "mega", "ultra", "pro", "max", "plus", "extra", "select",
-  "pack", "packets", "mini", "jumbo", "regular", "small", "large",
+  "packets", "mini", "jumbo", "regular", "small", "large",
   "new", "old", "traditional", "homestyle", "homemade", "authentic",
   "india", "indian", "punjabi", "bengali", "gujarati", "south", "north",
   "kitchen", "home", "farm", "garden", "harvest", "field", "nature",
@@ -469,14 +491,6 @@ const PRODUCT_NAME_WORDS = new Set([
   "soap", "shampoo", "powder", "lotion", "gel", "spray",
   "tablet", "capsule", "syrup", "drops",
   "pen", "pencil", "paper", "book", "bag", "box", "tin", "can", "bottle",
-  "big", "top", "one", "two", "plus", "zero", "five", "ten",
-  "net", "wt", "qty", "volume", "size", "weight", "count", "pieces",
-  "price", "mrp", "incl", "tax", "taxes",
-  "made", "product", "from", "origin", "country",
-  "consumer", "care", "helpline", "toll", "free", "phone", "email",
-  "website", "address", "contact", "service", "support", "help",
-  "ltd", "limited", "pvt", "private", "enterprises", "foods", "industries",
-  "products", "works", "company", "corp", "inc",
   // Indian FMCG brand tokens — explicitly added so brand names are
   // accepted even when they don't match the common English word list.
   "jimjam", "bikis", "nutrichoice", "tiger", "bourbon", "marie",
@@ -490,7 +504,7 @@ const PRODUCT_NAME_WORDS = new Set([
   "whisper", "stayfree", "tropicana", "frooti", "appy", "sprite",
   "fanta", "pepsi", "thums", "bisleri", "kinley", "aquafina",
   "revital", "supradyn", "becosules", "crocin", "paracetamol",
-  "glucose", "marie", "oreo", "bourbon", "bourbon", "parleg",
+  "glucose", "marie", "oreo", "bourbon", "parleg",
   "milkmaid", "nandini", "epigamia", "weikfield", "bagrrys", "kelloggs",
   "munch", "kitkat", "alpenliebe", "eclairs", "melody", "pulse",
   "bikano", "muncho", "tooyumm", "popcorn", "lays", "kurkure",

@@ -74,7 +74,7 @@ const KEYWORD_PATTERNS: Array<{ field: FieldHint; keyword: RegExp; pattern: RegE
   { field: "net_quantity", keyword: /net\b/i, pattern: /\d[\d.,]*\s*(kg|g|gm|grams?|ml|ltr|litres?|liters?|l\b|pcs|pieces?|nos?)(?!\s*(?:minute|min|protein|fat|calorie|serving))/i, weight: 0.82 },
   { field: "date", keyword: /mfd|mfg|manufactured|pkd|packed|packing|best\s*before|use\s*by|expiry|exp/i, pattern: /20\d{2}|(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b|\d{1,2}[\/\-.]\d{1,2}/i, weight: 0.9 },
   { field: "date", keyword: /\b\d{1,2}[\/\-.]\d{2,4}\b|\b\d{4}[\/\-.]\d{1,2}\b/i, pattern: /\d[\/\-.]\d/, weight: 0.75 },
-  { field: "manufacturer", keyword: /manufactured|mfd\.?\s*by|mfg\.?\s*by|packed\s*by|packer|marketed\s*by|imported\s*by|mktd|hungerford/i, pattern: /by\b.{3,}|hungerford/i, weight: 0.88 },
+  { field: "manufacturer", keyword: /manufactured\s*by|mfd\.?\s*by|mfg\.?\s*by|packed\s*by|packer|marketed\s*by|imported\s*by|mktd\s*by|manufactured\s*for|hungerford/i, pattern: /by\b.{3,}|hungerford/i, weight: 0.88 },
   { field: "manufacturer", keyword: /pvt\.?\s*ltd|limited|llp|enterprises\s*ltd|industries\s*ltd|products\s*ltd/i, pattern: /.{5,}\b(ltd|limited|llp|inc|corp)\b/i, weight: 0.82 },
   { field: "consumer_care", keyword: /consumer\s*care|customer\s*care|toll\s*free|helpline|feedback|complaint|1800|1860|@|www\.|\.com|\.in/i, pattern: /1800|1860|\d{4}[\s-]\d{3,}|@|www\./i, weight: 0.88 },
   { field: "country_of_origin", keyword: /country\s*of\s*origin|made\s*in|product\s*of|origin/i, pattern: /made\s*in|origin/i, weight: 0.85 },
@@ -85,8 +85,10 @@ const KEYWORD_PATTERNS: Array<{ field: FieldHint; keyword: RegExp; pattern: RegE
 export function classifyLine(text: string): { field: FieldHint; weight: number } | null {
   const t = text.trim();
   if (t.replace(/\s+/g, "").length < 2) return null;
+  const isDatePhrase = /\b(?:months?|date|dt)\s+(?:from|of)\b/i.test(t) || /\b(?:best\s*before|shelf\s*life|use\s*by|use\s*within)\b/i.test(t) || /\b(?:mfg|mfd|pkd|packed)\s+(?:date|dt|month|year)\b/i.test(t);
   let best: { field: FieldHint; weight: number } | null = null;
   for (const rule of KEYWORD_PATTERNS) {
+    if (isDatePhrase && rule.field === "manufacturer") continue;
     const hasKeyword = rule.keyword.test(t);
     const hasPattern = rule.pattern.test(t);
     if (rule.field === "mrp" || rule.field === "net_quantity" || rule.field === "unit_sale_price") {

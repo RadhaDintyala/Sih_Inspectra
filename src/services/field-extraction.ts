@@ -101,6 +101,18 @@ function extractSingleField(field: DeclarationField, lines: TextLine[]): FieldCa
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
+    if (field === "manufacturer") {
+      const prevLineText = i > 0 ? lines[i - 1].text : "";
+      const nextLineText = i + 1 < lines.length ? lines[i + 1].text : "";
+      const isDatePhrase = /\b(?:months?|date|dt)\s+(?:from|of)\b/i.test(line.text) ||
+                           /\b(?:best\s*before|shelf\s*life|use\s*by|use\s*within)\b/i.test(line.text) ||
+                           /\b(?:mfg|mfd|pkd|packed)\s+(?:date|dt|month|year)\b/i.test(line.text);
+      const isAdjacentToDate = /\b(?:month|months|best\s*before|shelf\s*life|date|dt)\b/i.test(prevLineText) ||
+                               /\b(?:month|months|best\s*before|shelf\s*life|date|dt)\b/i.test(nextLineText);
+      const hasMfrRole = /\b(?:by|for)\b/i.test(line.text) || /:\s*\w+/.test(line.text) || /\b(?:ltd|limited|pvt|llp|inc|corp)\b/i.test(line.text);
+      if (isDatePhrase || (isAdjacentToDate && !hasMfrRole)) continue;
+    }
+
     // ── Fuzzy anchor matching ──────────────────────────────────────
     let anchorMatch: { anchor: string; distance: number; position: number } | null = null;
     if (anchors.length > 0) {
@@ -405,6 +417,10 @@ function passesPlausibilityGate(
   // we also need a PIN code, Indian state name, or corporate suffix in the
   // assembled value before we consider it a valid manufacturer declaration.
   if (field === "manufacturer") {
+    const isDatePhrase = /\b(?:months?|date|dt)\s+(?:from|of)\b/i.test(cleaned) || /\b(?:best\s*before|shelf\s*life|use\s*by|use\s*within)\b/i.test(cleaned) || /\b(?:mfg|mfd|pkd|packed)\s+(?:date|dt|month|year)\b/i.test(cleaned);
+    if (isDatePhrase) {
+      return { passes: false, reason: "date/shelf-life phrase — not a manufacturer declaration" };
+    }
     const hasPIN = /\b\d{5,6}\b/.test(cleaned);
     const hasState = /\b(?:karnataka|bangalore|bengaluru|mumbai|delhi|kolkata|chennai|hyderabad|pune|ahmedabad|gurgaon|noida|haryana|maharashtra|tamil\s*nadu|kerala|andhra|telangana|gujarat|rajasthan|punjab|uttar\s*pradesh|bihar|odisha|west\s*bengal|assam|goa|india)\b/i.test(cleaned);
     const hasEntity = /\b(?:pvt\.?\s*ltd|limited|ltd\.?|llp|foods|industries|beverages|consumer\s*products|confectionery|bakeries|enterprises)\b/i.test(cleaned);

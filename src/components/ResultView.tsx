@@ -41,7 +41,7 @@ interface ResultViewProps {
 }
 
 const FIELD_LABELS: Record<string, string> = {
-  product_name: "Product Name",
+  product_name: "",
   mrp: "MRP",
   net_quantity: "Net Quantity",
   date: "Date of Mfg / Packing",
@@ -284,7 +284,7 @@ export function ResultView({
   }
 
   const isInvalidEvidence = inspection.status === "invalid_evidence" || inspection.verdict === "INVALID_EVIDENCE";
-  const productName = inspection.productName || "Packaged Commodity";
+  const productName = inspection.productName || "Not detected";
 
   const detectedDeclarations = useMemo(() => {
     const map = new Map<string, Declaration>();
@@ -350,15 +350,15 @@ export function ResultView({
               {role === "reviewer"
                 ? "Reviewer Decision Console"
                 : role === "admin"
-                ? "Administrator Verdict Override"
-                : "Officer Inspection Workflow"}
+                  ? "Administrator Verdict Override"
+                  : "Officer Inspection Workflow"}
             </strong>
             <small style={{ fontSize: "11px", color: "var(--muted)" }}>
               {role === "reviewer"
                 ? "Inspect OCR outputs and issue official statutory verdict (Approve / Reject)."
                 : role === "admin"
-                ? "Admin oversight console to review and finalize verdicts."
-                : "Complete scan details and submit for reviewer verification."}
+                  ? "Admin oversight console to review and finalize verdicts."
+                  : "Complete scan details and submit for reviewer verification."}
             </small>
           </div>
         </div>
@@ -578,25 +578,25 @@ export function ResultView({
                     d.bbox.height >= 0.3
                   )
                   .map((d) => {
-                  const isSelected = selectedField && (
-                    d.className === selectedField ||
-                    (inspection.declarations.find((decl) => decl.field === selectedField)?.evidenceImageId === currentImage.id)
-                  );
-                  const polyPoints = d.polygon && d.polygon.length >= 3
-                    ? d.polygon.map((p) => `${p[0]},${p[1]}`).join(" ")
-                    : `${d.bbox.x},${d.bbox.y} ${d.bbox.x + d.bbox.width},${d.bbox.y} ${d.bbox.x + d.bbox.width},${d.bbox.y + d.bbox.height} ${d.bbox.x},${d.bbox.y + d.bbox.height}`;
+                    const isSelected = selectedField && (
+                      d.className === selectedField ||
+                      (inspection.declarations.find((decl) => decl.field === selectedField)?.evidenceImageId === currentImage.id)
+                    );
+                    const polyPoints = d.polygon && d.polygon.length >= 3
+                      ? d.polygon.map((p) => `${p[0]},${p[1]}`).join(" ")
+                      : `${d.bbox.x},${d.bbox.y} ${d.bbox.x + d.bbox.width},${d.bbox.y} ${d.bbox.x + d.bbox.width},${d.bbox.y + d.bbox.height} ${d.bbox.x},${d.bbox.y + d.bbox.height}`;
 
-                  return (
-                    <polygon
-                      key={`det-${d.id}`}
-                      points={polyPoints}
-                      fill={isSelected ? "rgba(37, 99, 235, 0.2)" : "rgba(16, 185, 129, 0.08)"}
-                      stroke={isSelected ? "#2563eb" : "rgba(16, 185, 129, 0.65)"}
-                      strokeWidth={isSelected ? "0.7" : "0.35"}
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  );
-                })}
+                    return (
+                      <polygon
+                        key={`det-${d.id}`}
+                        points={polyPoints}
+                        fill={isSelected ? "rgba(37, 99, 235, 0.2)" : "rgba(16, 185, 129, 0.08)"}
+                        stroke={isSelected ? "#2563eb" : "rgba(16, 185, 129, 0.65)"}
+                        strokeWidth={isSelected ? "0.7" : "0.35"}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    );
+                  })}
 
                 {/* Render Selected & Matched Declarations */}
                 {inspection.declarations
@@ -606,12 +606,12 @@ export function ResultView({
                     const strokeColor = isSelected ? "#2563eb" : "#10b981";
                     const fillColor = isSelected ? "rgba(37, 99, 235, 0.35)" : "rgba(16, 185, 129, 0.15)";
                     const strokeWidth = isSelected ? "0.9" : "0.45";
-                    
+
                     const polyPoints = decl.polygon && decl.polygon.length >= 3
                       ? decl.polygon.map((p) => `${p[0]},${p[1]}`).join(" ")
                       : decl.boundingBox
-                      ? `${decl.boundingBox.x},${decl.boundingBox.y} ${decl.boundingBox.x + decl.boundingBox.width},${decl.boundingBox.y} ${decl.boundingBox.x + decl.boundingBox.width},${decl.boundingBox.y + decl.boundingBox.height} ${decl.boundingBox.x},${decl.boundingBox.y + decl.boundingBox.height}`
-                      : "";
+                        ? `${decl.boundingBox.x},${decl.boundingBox.y} ${decl.boundingBox.x + decl.boundingBox.width},${decl.boundingBox.y} ${decl.boundingBox.x + decl.boundingBox.width},${decl.boundingBox.y + decl.boundingBox.height} ${decl.boundingBox.x},${decl.boundingBox.y + decl.boundingBox.height}`
+                        : "";
 
                     if (!polyPoints) return null;
 
@@ -714,117 +714,117 @@ export function ResultView({
             </span>
           </div>
           <div
-  style={{
-    display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-    gap: "14px",
-    margin: "18px 0",
-  }}
->
-  {/* Smart Risk Triage */}
-  <div
-    style={{
-      border: "1px solid #e5e7eb",
-      borderRadius: "12px",
-      padding: "16px",
-      background: "#fff",
-    }}
-  >
-    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b" }}>
-      SMART RISK TRIAGE
-    </div>
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gap: "14px",
+              margin: "18px 0",
+            }}
+          >
+            {/* Smart Risk Triage */}
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: "12px",
+                padding: "16px",
+                background: "#fff",
+              }}
+            >
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b" }}>
+                SMART RISK TRIAGE
+              </div>
 
-    <div
-      style={{
-        marginTop: "8px",
-        fontSize: "26px",
-        fontWeight: 800,
-        color: counts.fail >= 2 ? "#b91c1c" : "#b45309",
-      }}
-    >
-      {counts.fail >= 2 ? "HIGH" : counts.fail >= 1 ? "MEDIUM" : "LOW"}
-    </div>
+              <div
+                style={{
+                  marginTop: "8px",
+                  fontSize: "26px",
+                  fontWeight: 800,
+                  color: counts.fail >= 2 ? "#b91c1c" : "#b45309",
+                }}
+              >
+                {counts.fail >= 2 ? "HIGH" : counts.fail >= 1 ? "MEDIUM" : "LOW"}
+              </div>
 
-    <div style={{ marginTop: "6px", fontSize: "13px", color: "#64748b" }}>
-      {counts.fail} potential fails · {counts.review} reviews
-    </div>
-  </div>
+              <div style={{ marginTop: "6px", fontSize: "13px", color: "#64748b" }}>
+                {counts.fail} potential fails · {counts.review} reviews
+              </div>
+            </div>
 
-  {/* Evidence Confidence */}
-  <div
-    style={{
-      border: "1px solid #e5e7eb",
-      borderRadius: "12px",
-      padding: "16px",
-      background: "#fff",
-    }}
-  >
-    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b" }}>
-      EVIDENCE CONFIDENCE
-    </div>
+            {/* Evidence Confidence */}
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: "12px",
+                padding: "16px",
+                background: "#fff",
+              }}
+            >
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b" }}>
+                EVIDENCE CONFIDENCE
+              </div>
 
-    <div
-      style={{
-        marginTop: "8px",
-        fontSize: "26px",
-        fontWeight: 800,
-      }}
-    >
-      {typeof inspection.score === "number"
-        ? `${inspection.score}%`
-        : "N/A"}
-    </div>
+              <div
+                style={{
+                  marginTop: "8px",
+                  fontSize: "26px",
+                  fontWeight: 800,
+                }}
+              >
+                {typeof inspection.score === "number"
+                  ? `${inspection.score}%`
+                  : "N/A"}
+              </div>
 
-    <div style={{ marginTop: "6px", fontSize: "13px", color: "#64748b" }}>
-      Inspection evidence signal
-    </div>
-  </div>
+              <div style={{ marginTop: "6px", fontSize: "13px", color: "#64748b" }}>
+                Inspection evidence signal
+              </div>
+            </div>
 
-  {/* Historical Label Change */}
-  <div
-    style={{
-      border: "1px solid #e5e7eb",
-      borderRadius: "12px",
-      padding: "16px",
-      background: "#fff",
-    }}
-  >
-    <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b" }}>
-      LABEL CHANGE MONITOR
-    </div>
+            {/* Historical Label Change */}
+            <div
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: "12px",
+                padding: "16px",
+                background: "#fff",
+              }}
+            >
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b" }}>
+                LABEL CHANGE MONITOR
+              </div>
 
-    <div
-      style={{
-        marginTop: "8px",
-        fontSize: "17px",
-        fontWeight: 700,
-      }}
-    >
-      Historical comparison
-    </div>
+              <div
+                style={{
+                  marginTop: "8px",
+                  fontSize: "17px",
+                  fontWeight: 700,
+                }}
+              >
+                Historical comparison
+              </div>
 
-    <div style={{ marginTop: "6px", fontSize: "13px", color: "#64748b" }}>
-      Compare previous inspection records.
-    </div>
+              <div style={{ marginTop: "6px", fontSize: "13px", color: "#64748b" }}>
+                Compare previous inspection records.
+              </div>
 
-    <button
-      type="button"
-     onClick={() => setShowHistoryTimeline(true)}
-      style={{
-        marginTop: "12px",
-        border: "1px solid #cbd5e1",
-        borderRadius: "7px",
-        padding: "7px 11px",
-        background: "#f8fafc",
-        cursor: "pointer",
-        fontSize: "12px",
-        fontWeight: 600,
-      }}
-    >
-      Open Timeline
-    </button>
-  </div>
-</div>
+              <button
+                type="button"
+                onClick={() => setShowHistoryTimeline(true)}
+                style={{
+                  marginTop: "12px",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "7px",
+                  padding: "7px 11px",
+                  background: "#f8fafc",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                }}
+              >
+                Open Timeline
+              </button>
+            </div>
+          </div>
           {detectedDeclarations.length > 0 ? (
             <div className="rv-cards-grid">
               {detectedDeclarations.map((decl) => {
@@ -1100,200 +1100,200 @@ export function ResultView({
         </div>
       )}
       {/* ── Historical Inspection Timeline Modal ───────────────────── */}
-  {showHistoryTimeline && (
-  <div
-    onClick={() => setShowHistoryTimeline(false)}
-    style={{
-      position: "fixed",
-      inset: 0,
-      zIndex: 99999,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: "24px",
-      background: "rgba(15, 23, 42, 0.55)",
-    }}
-  >
-   <div
-  className="rv-modal"
-  onClick={(e) => e.stopPropagation()}
-  style={{
-    width: "780px",
-    maxWidth: "90vw",
-    maxHeight: "85vh",
-    overflowY: "auto",
-    boxSizing: "border-box",
-  }}
->
-      <div className="rv-modal-head">
-        <div>
-          <span
-            className="eyebrow"
-            style={{
-              display: "block",
-              fontSize: "0.68rem",
-              letterSpacing: "0.08em",
-            }}
-          >
-            LABEL CHANGE MONITOR
-          </span>
-
-          <h3 style={{ marginTop: "5px" }}>
-            Inspection History
-          </h3>
-        </div>
-
-        <button
-          type="button"
-          className="rv-modal-close"
+      {showHistoryTimeline && (
+        <div
           onClick={() => setShowHistoryTimeline(false)}
-        >
-          <X size={16} />
-        </button>
-      </div>
-
-      <div className="rv-modal-body">
-        <div
           style={{
-            borderLeft: "3px solid #2563eb",
-            paddingLeft: "14px",
+            position: "fixed",
+            inset: 0,
+            zIndex: 99999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "24px",
+            background: "rgba(15, 23, 42, 0.55)",
           }}
         >
           <div
+            className="rv-modal"
+            onClick={(e) => e.stopPropagation()}
             style={{
-              fontSize: "0.72rem",
-              fontWeight: 700,
-              color: "#2563eb",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
+              width: "780px",
+              maxWidth: "90vw",
+              maxHeight: "85vh",
+              overflowY: "auto",
+              boxSizing: "border-box",
             }}
           >
-            Current Inspection
-          </div>
+            <div className="rv-modal-head">
+              <div>
+                <span
+                  className="eyebrow"
+                  style={{
+                    display: "block",
+                    fontSize: "0.68rem",
+                    letterSpacing: "0.08em",
+                  }}
+                >
+                  LABEL CHANGE MONITOR
+                </span>
 
-          <div
-            style={{
-              fontSize: "1.05rem",
-              fontWeight: 700,
-              marginTop: "6px",
-            }}
-          >
-            {productName}
-          </div>
+                <h3 style={{ marginTop: "5px" }}>
+                  Inspection History
+                </h3>
+              </div>
 
-          <div
-            style={{
-              fontSize: "0.82rem",
-              color: "var(--text-muted, #64748b)",
-              marginTop: "6px",
-              lineHeight: 1.6,
-            }}
-          >
-            <div>
-              Inspection date: {formatDate(inspection.createdAt)}
+              <button
+                type="button"
+                className="rv-modal-close"
+                onClick={() => setShowHistoryTimeline(false)}
+              >
+                <X size={16} />
+              </button>
             </div>
 
-            <div>
-              Verdict: {inspection.status}
-            </div>
+            <div className="rv-modal-body">
+              <div
+                style={{
+                  borderLeft: "3px solid #2563eb",
+                  paddingLeft: "14px",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "0.72rem",
+                    fontWeight: 700,
+                    color: "#2563eb",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                  }}
+                >
+                  Current Inspection
+                </div>
 
-            <div>
-              Score:{" "}
-              {typeof inspection.score === "number"
-                ? `${inspection.score}/100`
-                : "Unavailable"}
-            </div>
-          </div>
-        </div>
+                <div
+                  style={{
+                    fontSize: "1.05rem",
+                    fontWeight: 700,
+                    marginTop: "6px",
+                  }}
+                >
+                  {productName}
+                </div>
 
-        <div
-          style={{
-            marginTop: "18px",
-            padding: "14px",
-            borderRadius: "8px",
-            background: "rgba(37, 99, 235, 0.06)",
-            border: "1px solid rgba(37, 99, 235, 0.15)",
-          }}
-        >
-          <div
-            style={{
-              fontWeight: 700,
-              fontSize: "0.86rem",
-            }}
-          >
-            Historical comparison
-          </div>
+                <div
+                  style={{
+                    fontSize: "0.82rem",
+                    color: "var(--text-muted, #64748b)",
+                    marginTop: "6px",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  <div>
+                    Inspection date: {formatDate(inspection.createdAt)}
+                  </div>
 
-          <p
-            style={{
-              margin: "6px 0 0",
-              fontSize: "0.8rem",
-              color: "var(--text-muted, #64748b)",
-              lineHeight: 1.5,
-            }}
-          >
-            Previous inspection records can be reviewed from the
-            System Archive and compared against this inspection for
-            declaration changes.
-          </p>
-        </div>
+                  <div>
+                    Verdict: {inspection.status}
+                  </div>
+
+                  <div>
+                    Score:{" "}
+                    {typeof inspection.score === "number"
+                      ? `${inspection.score}/100`
+                      : "Unavailable"}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  marginTop: "18px",
+                  padding: "14px",
+                  borderRadius: "8px",
+                  background: "rgba(37, 99, 235, 0.06)",
+                  border: "1px solid rgba(37, 99, 235, 0.15)",
+                }}
+              >
+                <div
+                  style={{
+                    fontWeight: 700,
+                    fontSize: "0.86rem",
+                  }}
+                >
+                  Historical comparison
+                </div>
+
+                <p
+                  style={{
+                    margin: "6px 0 0",
+                    fontSize: "0.8rem",
+                    color: "var(--text-muted, #64748b)",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Previous inspection records can be reviewed from the
+                  System Archive and compared against this inspection for
+                  declaration changes.
+                </p>
+              </div>
               <LabelChangeComparison inspection={inspection} />
 
-        {inspection.timeline && inspection.timeline.length > 0 && (
-          <div style={{ marginTop: "18px" }}>
-            <div
-              style={{
-                fontSize: "0.72rem",
-                fontWeight: 700,
-                color: "var(--text-muted, #64748b)",
-                textTransform: "uppercase",
-                marginBottom: "8px",
-              }}
-            >
-              Current Processing Timeline
+              {inspection.timeline && inspection.timeline.length > 0 && (
+                <div style={{ marginTop: "18px" }}>
+                  <div
+                    style={{
+                      fontSize: "0.72rem",
+                      fontWeight: 700,
+                      color: "var(--text-muted, #64748b)",
+                      textTransform: "uppercase",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Current Processing Timeline
+                  </div>
+
+                  <div className="rv-timeline">
+                    {inspection.timeline.map((evt, idx) => (
+                      <div key={idx} className="rv-tl-row">
+                        <span className="rv-tl-time">
+                          {evt.at.slice(11, 19)}
+                        </span>
+
+                        <span
+                          className={`rv-tl-status rv-tls-${evt.status.toLowerCase()}`}
+                        >
+                          {evt.status}
+                        </span>
+
+                        <span className="rv-tl-stage">
+                          {evt.stage}
+                        </span>
+
+                        {evt.detail && (
+                          <span className="rv-tl-detail">
+                            {evt.detail}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="rv-timeline">
-              {inspection.timeline.map((evt, idx) => (
-                <div key={idx} className="rv-tl-row">
-                  <span className="rv-tl-time">
-                    {evt.at.slice(11, 19)}
-                  </span>
-
-                  <span
-                    className={`rv-tl-status rv-tls-${evt.status.toLowerCase()}`}
-                  >
-                    {evt.status}
-                  </span>
-
-                  <span className="rv-tl-stage">
-                    {evt.stage}
-                  </span>
-
-                  {evt.detail && (
-                    <span className="rv-tl-detail">
-                      {evt.detail}
-                    </span>
-                  )}
-                </div>
-              ))}
+            <div className="rv-modal-foot">
+              <button
+                type="button"
+                className="rv-btn-secondary"
+                onClick={() => setShowHistoryTimeline(false)}
+              >
+                Close
+              </button>
             </div>
           </div>
-        )}
-      </div>
-
-      <div className="rv-modal-foot">
-        <button
-          type="button"
-          className="rv-btn-secondary"
-          onClick={() => setShowHistoryTimeline(false)}
-        >
-          Close
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+        </div>
+      )}
 
       {/* ── Inspection Report Modal ───────────────────────────────── */}
       {reportOpen && (
