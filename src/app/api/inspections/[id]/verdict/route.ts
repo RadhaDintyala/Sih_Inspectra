@@ -46,8 +46,8 @@ export async function POST(
 
     const updatedInspection = {
       ...inspection,
-      status: newStatus as any,
-      verdict: newVerdict as any,
+      status: newStatus as typeof inspection.status,
+      verdict: newVerdict as typeof inspection.verdict,
       notes: [...(inspection.notes || []), `[${new Date().toLocaleDateString("en-IN")}] Verdict ${decision} by Reviewer @${session.username}: ${rationale}`],
       updatedAt: new Date().toISOString(),
     };

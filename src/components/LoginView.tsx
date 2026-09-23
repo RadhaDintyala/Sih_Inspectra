@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Lock, ShieldCheck, User, KeyRound, AlertTriangle, ArrowRight, ShieldAlert } from "lucide-react";
+import { ShieldCheck, User, KeyRound, AlertTriangle, ArrowRight, ShieldAlert } from "lucide-react";
 import type { SessionUser } from "@/services/auth";
 
 interface LoginViewProps {

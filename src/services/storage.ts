@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Object Storage — evidence truth.
  *
@@ -39,7 +40,7 @@ function s3Configured(): boolean {
 }
 
 class S3ObjectStorageService implements ObjectStorageService {
-  private client: unknown = null;
+  private client: any = null;
   private bucket: string;
   private endpoint: string;
   private initError: string | null = null;

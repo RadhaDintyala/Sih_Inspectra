@@ -86,7 +86,6 @@ export function LiveOverlay({
       const bx = evidence.bbox;
       if (!bx || bx.width <= 0 || bx.height <= 0) continue;
 
-      const y = yOff + i * lineH;
       const displayValue = field.value.length > 30 ? field.value.slice(0, 30) + "…" : field.value;
 
       ctx.font = `${Math.max(11, 13 * devicePixelRatio)}px monospace`;
@@ -116,7 +115,7 @@ export function LiveOverlay({
     ctx.textAlign = "right";
     ctx.fillText(badge, canvas.width - 12, 14);
     ctx.textAlign = "left";
-  }, [detectionState, detection, videoRef, rotation, mirrored, devicePixelRatio, canvasRef]);
+  }, [detectionState, detection, videoRef, rotation, devicePixelRatio, canvasRef]);
 
   useEffect(() => {
     if (!canvasRef.current) return;

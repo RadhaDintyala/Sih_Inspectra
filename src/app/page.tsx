@@ -54,7 +54,7 @@ function newInspection() {
 }
 
 export default function Home() {
-  const { user, role, isAuthenticated, isLoadingAuth, login, logout, isAdmin, isOfficer, isReviewer } = useRole();
+  const { user, role, isAuthenticated, isLoadingAuth, login, logout, isAdmin, isReviewer } = useRole();
   const [view, setView] = useState<View>("scan");
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [phase, setPhase] = useState<AnalysisPhase>("image");
@@ -96,8 +96,10 @@ export default function Home() {
     if (isAuthenticated && !initialViewSetRef.current) {
       initialViewSetRef.current = true;
       if (isAdmin) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setView("dashboard");
       } else if (isReviewer) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setView("reviewer_queue");
       } else {
         startInspection();
@@ -122,6 +124,7 @@ export default function Home() {
 
   useEffect(() => {
     if (isAuthenticated) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       fetchHistory();
 
       // Start background sync engine for offline pending_sync re-verification
@@ -256,7 +259,7 @@ export default function Home() {
     const payloadKb = (payloadBytes / 1024).toFixed(1);
     console.log(`[ScanAnalyze] Dispatching ${activeFiles.length} file(s), payload size: ${payloadKb} KB`);
 
-    let maxAttempts = 2;
+    const maxAttempts = 2;
     let attempt = 0;
     let success = false;
 

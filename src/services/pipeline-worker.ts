@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Analysis Worker — official inspection pipeline.
  *
@@ -411,7 +412,7 @@ export async function processInspectionPipeline(job: PipelineJob): Promise<Inspe
     for (const field of TARGET_FIELDS) {
       const declMatch = batchResult.declarations.find((d) => d.field === field);
       if (declMatch && (declMatch.status === "DETECTED" || declMatch.status === "CONFLICT") && declMatch.value) {
-        const isConflict = declMatch.status === "CONFLICT" || Boolean((declMatch as any).conflict);
+        const isConflict = declMatch.status === "CONFLICT" || Boolean((declMatch as unknown as { conflict?: boolean }).conflict);
         const normalizedVal = isConflict ? declMatch.value : normalizeFieldValue(field, declMatch.value);
         if (!normalizedVal) {
           declarations.push({
@@ -429,7 +430,7 @@ export async function processInspectionPipeline(job: PipelineJob): Promise<Inspe
         const matchingEv = evidenceImages.find((ev) => sourceImgId.includes(ev.id) || ev.id.includes(sourceImgId));
         if (matchingEv) sourceImgId = matchingEv.id;
 
-        const mappedCandidates = (declMatch.candidates || [{ value: normalizedVal, sourceImageId: sourceImgId, rawValue: declMatch.rawValue }]).map((c: any) => {
+        const mappedCandidates = (declMatch.candidates || [{ value: normalizedVal, sourceImageId: sourceImgId, rawValue: declMatch.rawValue }]).map((c) => {
           let cSourceId = c.sourceImageId || sourceImgId;
           const matchC = evidenceImages.find((ev) => cSourceId.includes(ev.id) || ev.id.includes(cSourceId));
           if (matchC) cSourceId = matchC.id;
@@ -442,14 +443,14 @@ export async function processInspectionPipeline(job: PipelineJob): Promise<Inspe
           };
         });
 
-        const distinctEvIds = Array.from(new Set(mappedCandidates.map((c: any) => c.sourceImageId).filter(Boolean))) as string[];
+        const distinctEvIds = Array.from(new Set(mappedCandidates.map((c) => c.sourceImageId).filter(Boolean))) as string[];
 
         declarations.push({
           field,
           value: normalizedVal,
           rawValue: declMatch.rawValue || declMatch.value,
           status: declMatch.status as Declaration["status"],
-          conflict: (declMatch.status as string) === "CONFLICT" || Boolean((declMatch as any).conflict),
+          conflict: (declMatch.status as string) === "CONFLICT" || Boolean((declMatch as unknown as { conflict?: boolean }).conflict),
           confidence: declMatch.confidence ?? 0.95,
           evidenceImageId: sourceImgId,
           evidenceImageIds: distinctEvIds.length > 0 ? distinctEvIds : [sourceImgId],

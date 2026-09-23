@@ -360,11 +360,11 @@ describe("Pipeline Regression Suite: Legal Metrology (Packaged Commodities) Rule
       // Verify immutable audit log recorded
       const auditLogs = getData.auditLogs;
       expect(auditLogs.length).toBeGreaterThan(0);
-      const overrideLog = auditLogs.find((l: any) => l.action === "MANUAL_OVERRIDE");
+      const overrideLog = auditLogs.find((l: Record<string, unknown>) => l.action === "MANUAL_OVERRIDE");
       expect(overrideLog).toBeDefined();
       expect(overrideLog.userId).toBe(delhiOfficerId);
       expect(overrideLog.organizationId).toBe(delhiOrgId);
-      const details = overrideLog.detailsJson ? JSON.parse(overrideLog.detailsJson) : (overrideLog as any).details;
+      const details = overrideLog.detailsJson ? JSON.parse(overrideLog.detailsJson as string) : (overrideLog as Record<string, unknown>).details as Record<string, unknown>;
       expect(details.field).toBe("mrp");
       expect(details.correctedValue).toBe("₹25.00 (INCL. OF ALL TAXES)");
       expect(details.rationale).toContain("Physical verification");

@@ -4,14 +4,11 @@
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `GEMINI_API_KEY` | Yes* | — | Google Gemini API key. Get one free at https://aistudio.google.com |
-| `GEMINI_MODEL` | No | `gemini-3.6-flash` | Gemini model ID for vision extraction |
-| `TEST_MODE` | No | `false` | When `true`, uses `LocalSampleExtractionAdapter` (no API key needed) |
-| `SCAN_STORE_DIR` | No | `.scan-store` | Absolute or relative path for inspection JSON files |
+| `DATABASE_URL` | Yes | — | PostgreSQL connection URL (e.g. Neon, Supabase, Render Postgres) |
+| `SESSION_SECRET` | No | `inspectra-secret-key...` | Tamper-proof HMAC secret key for signed session cookies |
+| `SCAN_STORE_DIR` | No | `.scan-store` | Relative/absolute directory for local file storage fallback |
 
-\* Required for real inspections. Not needed if running with `TEST_MODE=true`.
-
-Copy `.env.example` to `.env` and fill in your key:
+Copy `.env.example` to `.env` and fill in your values:
 
 ```bash
 cp .env.example .env
@@ -63,7 +60,7 @@ CMD ["node", "server.js"]
 ```bash
 docker build -t inspectra .
 docker run -p 3000:3000 \
-  -e GEMINI_API_KEY=your_key_here \
+  -e DATABASE_URL="postgresql://..." \
   -v inspect-store:/app/.scan-store \
   inspectra
 ```
@@ -77,7 +74,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DATABASE_URL=${DATABASE_URL}
     volumes:
       - scan-store:/app/.scan-store
 

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { analyzePackagePresence } from "@/services/package-gate";
 import { classifyLine } from "@/services/yolo-service";
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
     });
 
     // ── Declarations: prefer the Python engine's own extraction ─────────
-    const declarations: any[] = [];
+    const declarations: Array<Record<string, unknown>> = [];
     if (ocrResult.declarations && ocrResult.declarations.length > 0) {
       for (const d of ocrResult.declarations) {
         if (!LIVE_FIELD_SET.has(d.field)) continue;
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Last-resort TS extraction when the engine produced no declarations
-    const seenFields = new Set<string>(declarations.map((d) => d.field));
+    const seenFields = new Set<string>(declarations.map((d) => String(d.field)));
     if (declarations.length === 0 && allLines.length > 0) {
       const candidates = extractFieldCandidates(allLines, TARGET_FIELDS);
       const normalizeField = (field: DeclarationField, text: string): string | null => {
@@ -119,9 +120,9 @@ export async function POST(request: NextRequest) {
         }
       };
       for (const field of TARGET_FIELDS) {
-        const fieldCands = candidates.filter((c: any) => c.field === field && c.value);
+        const fieldCands = candidates.filter((c) => c.field === field && c.value);
         if (fieldCands.length === 0) continue;
-        const best = fieldCands.sort((a: any, b: any) => b.score - a.score)[0];
+        const best = fieldCands.sort((a, b) => b.score - a.score)[0];
         if (seenFields.has(field)) continue;
         seenFields.add(field);
         const normalizedValue = normalizeField(field, best.value) || best.value;
@@ -138,9 +139,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Product-name fallback from leading lines when still missing
-    const productName = declarations.find((d: any) => d.field === "product_name")?.value || null;
+    const productName = (declarations.find((d) => d.field === "product_name")?.value as string) || null;
     if (!productName && allLines.length > 0 && !seenFields.has("product_name")) {
-      const topLines = allLines.slice(0, 5).map((l: any) => l.text).join(" ");
+      const topLines = allLines.slice(0, 5).map((l) => l.text).join(" ");
       const normName = normalizeProductName(topLines);
       if (normName) {
         declarations.push({

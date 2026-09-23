@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Production PaddleOCR (PP-OCRv4 ONNX) & YOLO Vision Service.
  *
@@ -703,7 +704,7 @@ export class PaddleOcrService {
    */
   async recognizeCropProposals(
     imageBuffer: Buffer,
-    rois: any[]
+    _rois: unknown[]
   ): Promise<{
     mergedText: string;
     lines: Array<{ text: string; confidence: number; bbox: BoundingBox }>;

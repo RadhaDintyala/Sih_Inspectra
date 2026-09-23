@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ShieldCheck, Search, Filter, RefreshCw, Clock, User, FileText, AlertCircle, CheckCircle2, XCircle } from "lucide-react";
+import { ShieldCheck, Search, Filter, RefreshCw, Clock, User, FileText, AlertCircle } from "lucide-react";
 
 interface AuditLogItem {
   id: string;
   action: string;
   entityType: string;
   entityId: string;
-  details: Record<string, any>;
+  details: Record<string, unknown>;
   timestamp: string;
   user?: {
     id: string;
@@ -51,7 +51,7 @@ export function AuditLogView() {
   }
 
   useEffect(() => {
-    fetchLogs();
+    queueMicrotask(() => void fetchLogs());
   }, []);
 
   const filteredLogs = logs.filter((log) => {

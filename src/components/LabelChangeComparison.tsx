@@ -209,7 +209,7 @@ function cleanMRP(value: unknown): string {
 function getDeclarations(
   inspection: HistoryRecord | Inspection | null | undefined,
 ): DeclarationLike[] {
-  const declarations = (inspection as any)?.declarations;
+  const declarations = (inspection as unknown as { declarations?: DeclarationLike[] })?.declarations;
 
   return Array.isArray(declarations) ? declarations : [];
 }
@@ -264,7 +264,7 @@ function getProductIdentity(
   inspection: HistoryRecord | Inspection | null | undefined,
 ): string {
   const directProductName = String(
-    (inspection as any)?.productName ?? "",
+    (inspection as unknown as { productName?: string })?.productName ?? "",
   ).trim();
 
   // Ignore generic/default product names.
@@ -630,14 +630,14 @@ function getUnchangedFields(
   return unchanged;
 }
 
-function extractInspection(data: any): HistoryRecord | null {
+function extractInspection(data: Record<string, unknown> | null | undefined): HistoryRecord | null {
   if (!data) return null;
 
-  if (data.inspection) return data.inspection;
-  if (data.data?.inspection) return data.data.inspection;
-  if (data.data) return data.data;
-  if (data.result?.inspection) return data.result.inspection;
-  if (data.result) return data.result;
+  if (data.inspection) return data.inspection as HistoryRecord;
+  if ((data.data as Record<string, unknown> | undefined)?.inspection) return (data.data as Record<string, unknown>).inspection as HistoryRecord;
+  if (data.data) return data.data as HistoryRecord;
+  if ((data.result as Record<string, unknown> | undefined)?.inspection) return (data.result as Record<string, unknown>).inspection as HistoryRecord;
+  if (data.result) return data.result as HistoryRecord;
 
   return data;
 }

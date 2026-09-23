@@ -1,15 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  ArrowUpRight,
   Camera,
   Check,
-  Image as ImageIcon,
-  Info,
-  Lock,
   ScanLine,
-  ShieldCheck,
   Upload,
   X,
   AlertTriangle,
@@ -19,11 +14,10 @@ import {
   SwitchCamera,
   Plus,
   Trash2,
-  Eye,
   Radio,
   RadioOff,
 } from "lucide-react";
-import type { AnalysisPhase, Inspection, EvidenceImage, DeclarationField } from "@/domain/inspection";
+import type { AnalysisPhase, Inspection, EvidenceImage } from "@/domain/inspection";
 import { analyzeFrame, type FrameAnalysisResult } from "@/services/frame-analysis";
 import { compressAndDownscaleImage } from "@/services/image-compression";
 import type { UserRole } from "@/context/RoleContext";
@@ -289,9 +283,14 @@ export function ScanView({
   }
 
   const isMirroredRef = useRef(isMirrored);
-  isMirroredRef.current = isMirrored;
   const rotationRef = useRef(rotation);
-  rotationRef.current = rotation;
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
+    isMirroredRef.current = isMirrored;
+    // eslint-disable-next-line react-hooks/immutability
+    rotationRef.current = rotation;
+  }, [isMirrored, rotation]);
 
   const gateInFlightRef = useRef(false);
   const gateCheck = async () => {
@@ -328,10 +327,10 @@ export function ScanView({
 
   useEffect(() => {
     if (!cameraOpen) {
-      setServerGate(null);
+      queueMicrotask(() => setServerGate(null));
       return;
     }
-    setServerGate({ state: "LOOKING", tip: "Looking for package..." });
+    queueMicrotask(() => setServerGate({ state: "LOOKING", tip: "Looking for package..." }));
     const timer = setInterval(gateCheck, 2500);
     return () => clearInterval(timer);
   }, [cameraOpen]);
@@ -353,7 +352,7 @@ export function ScanView({
   // Adjust selected index when images change
   useEffect(() => {
     if (images.length > 0 && selectedImageIndex >= images.length) {
-      setSelectedImageIndex(images.length - 1);
+      queueMicrotask(() => setSelectedImageIndex(images.length - 1));
     }
   }, [images.length, selectedImageIndex]);
 
@@ -362,7 +361,7 @@ export function ScanView({
     if (!cameraOpen) {
       if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
       previousGrayRef.current = null;
-      setTier0Result(null);
+      queueMicrotask(() => setTier0Result(null));
       return;
     }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { CheckCircle2, XCircle, AlertTriangle, ChevronRight, Search, Filter, ShieldCheck, Eye } from "lucide-react";
+import { CheckCircle2, XCircle, AlertTriangle, ChevronRight, Eye } from "lucide-react";
 import type { Inspection } from "@/domain/inspection";
 
 interface ReviewerQueueViewProps {
@@ -13,7 +13,7 @@ interface ReviewerQueueViewProps {
 export function ReviewerQueueView({ inspections, onSelectInspection, isLoading = false }: ReviewerQueueViewProps) {
   const pendingReviewList = useMemo(() => {
     return inspections.filter(
-      (i) => i.status === "review" || i.status === "processing" || (i as any).processingStatus === "REVIEW_REQUIRED"
+      (i) => i.status === "review" || i.status === "processing" || (i as unknown as { processingStatus?: string }).processingStatus === "REVIEW_REQUIRED"
     );
   }, [inspections]);
 

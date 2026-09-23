@@ -43,7 +43,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    fetchSession();
+    queueMicrotask(() => void fetchSession());
   }, [fetchSession]);
 
   const login = useCallback((newUser: SessionUser) => {

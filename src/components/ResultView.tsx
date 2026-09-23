@@ -8,7 +8,6 @@ import {
   Clock,
   Edit3,
   FileDown,
-  FileText,
   Globe,
   Layers,
   Mail,
@@ -17,7 +16,6 @@ import {
   ShieldCheck,
   X,
   XCircle,
-  Eye,
   Camera,
 } from "lucide-react";
 import type { ComplianceCheck, Declaration, Inspection, EvidenceImage, DeclarationField } from "@/domain/inspection";
@@ -540,6 +538,7 @@ export function ResultView({
                 boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
               }}
             >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={currentImage.uri}
                 alt={`Evidence photo ${activeImageIndex + 1}`}

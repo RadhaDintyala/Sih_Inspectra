@@ -46,7 +46,7 @@ function resolveTrainedDataDir(): string | null {
     path.join(__dirname, "..", "..", "eng.traineddata"),
   ];
   for (const p of candidates) {
-    if (fs.existsSync(p)) {
+    if (fs.existsSync(/*turbopackIgnore: true*/ p)) {
       trainedDataDir = path.dirname(p);
       return trainedDataDir;
     }

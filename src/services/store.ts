@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Server-side persistence for inspection records via SQLite/PostgreSQL & Prisma ORM.
  * Multi-tenant, role-gated, evidence-backed repository.
@@ -6,7 +7,7 @@
 import { PrismaClient } from "@prisma/client";
 import fs from "fs";
 import path from "path";
-import type { Inspection, InspectionStatus, EvidenceImage, ComplianceCheck, PhysicalMeasurement } from "@/domain/inspection";
+import type { Inspection, InspectionStatus, EvidenceImage, ComplianceCheck, PhysicalMeasurement, DeclarationField } from "@/domain/inspection";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
@@ -350,7 +351,7 @@ export async function saveInspection(inspection: Inspection): Promise<Inspection
 }
 
 export async function getInspection(id: string, orgId?: string): Promise<Inspection | null> {
-  const whereClause: any = { id };
+  const whereClause: Record<string, unknown> = { id };
   if (orgId) {
     whereClause.organizationId = orgId;
   }
@@ -365,7 +366,7 @@ export async function getInspection(id: string, orgId?: string): Promise<Inspect
   });
 
   if (!record) return null;
-  return mapRecordToInspection(record);
+  return mapRecordToInspection(record as unknown as Record<string, unknown>);
 }
 
 export async function listInspections(options?: {
@@ -374,7 +375,7 @@ export async function listInspections(options?: {
   limit?: number;
   offset?: number;
 }): Promise<{ inspections: Inspection[]; total: number }> {
-  const where: any = {};
+  const where: Record<string, unknown> = {};
   if (options?.orgId) {
     where.organizationId = options.orgId;
   }
@@ -398,13 +399,13 @@ export async function listInspections(options?: {
   ]);
 
   return {
-    inspections: records.map(mapRecordToInspection),
+    inspections: records.map((r) => mapRecordToInspection(r as unknown as Record<string, unknown>)),
     total,
   };
 }
 
 export async function countInspections(organizationId?: string): Promise<number> {
-  const where: any = {};
+  const where: Record<string, unknown> = {};
   if (organizationId) where.organizationId = organizationId;
   return prisma.inspectionRecord.count({ where });
 }
@@ -450,7 +451,7 @@ export async function updateDeclarationOverride(
   // Re-evaluate compliance rule for this field
   const updatedDecl = {
     ...targetDecl,
-    field: field as any,
+    field: field as DeclarationField,
     value: newValue,
     status: "VERIFIED" as const,
     confidence: 1.0,

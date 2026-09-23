@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
     const session = await getSessionFromRequest(request);
     const orgId = session?.role?.toUpperCase() === "ADMIN" ? undefined : session?.organizationId;
 
-    const where: any = {};
+    const where: Record<string, unknown> = {};
     if (orgId) {
       where.organizationId = orgId;
     }

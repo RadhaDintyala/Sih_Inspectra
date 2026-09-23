@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { DetectionResult, LiveDetectionState, LiveDeclaration } from "@/services/live-inference";
 import { emptyDetectionState, updateDetectionState, stateHasAnyDetection } from "@/services/live-inference";
 import type { FrameAnalysisResult } from "@/services/frame-analysis";
