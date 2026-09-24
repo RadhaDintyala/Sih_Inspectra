@@ -36,18 +36,18 @@ export interface ObjectStorageService {
 }
 
 function s3Configured(): boolean {
-  return Boolean(process.env.S3_ENDPOINT && process.env.S3_BUCKET);
+  const bucket = process.env.S3_BUCKET?.trim();
+  const endpoint = process.env.S3_ENDPOINT?.trim();
+  const accessKey = process.env.S3_ACCESS_KEY?.trim();
+  return Boolean(bucket && (endpoint || accessKey));
 }
 
 class S3ObjectStorageService implements ObjectStorageService {
   private client: any = null;
-  private bucket: string;
-  private endpoint: string;
   private initError: string | null = null;
 
-  constructor() {
-    this.bucket = process.env.S3_BUCKET || "inspectra-evidence";
-    this.endpoint = process.env.S3_ENDPOINT || "http://localhost:9000";
+  private get bucket(): string {
+    return process.env.S3_BUCKET?.trim() || "inspectra-evidence";
   }
 
   private async getClient(): Promise<any> {
@@ -55,22 +55,55 @@ class S3ObjectStorageService implements ObjectStorageService {
     if (this.initError) throw new Error(this.initError);
     try {
       const { S3Client } = await import("@aws-sdk/client-s3");
-      const client = new S3Client({
-        endpoint: this.endpoint,
-        region: process.env.S3_REGION || "us-east-1",
-        credentials: {
-          accessKeyId: process.env.S3_ACCESS_KEY || "minioadmin",
-          secretAccessKey: process.env.S3_SECRET_KEY || "minioadmin",
-        },
-        forcePathStyle: true,
-      });
-      // Ensure bucket exists (idempotent).
-      const { HeadBucketCommand, CreateBucketCommand } = await import("@aws-sdk/client-s3");
-      try {
-        await client.send(new HeadBucketCommand({ Bucket: this.bucket }));
-      } catch {
-        await client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+      const rawEndpoint = process.env.S3_ENDPOINT?.trim();
+      const endpoint = rawEndpoint && rawEndpoint.length > 0 ? rawEndpoint : undefined;
+      const region = process.env.S3_REGION?.trim() || "us-east-1";
+      const accessKeyId = (process.env.S3_ACCESS_KEY || "minioadmin").trim();
+      const secretAccessKey = (process.env.S3_SECRET_KEY || "minioadmin").trim();
+
+      const envForcePathStyle = process.env.S3_FORCE_PATH_STYLE?.trim();
+      let forcePathStyle: boolean;
+      if (envForcePathStyle === "true") {
+        forcePathStyle = true;
+      } else if (envForcePathStyle === "false") {
+        forcePathStyle = false;
+      } else {
+        // Path-style addressing is required for local MinIO (e.g. localhost/127.0.0.1)
+        // Cloud S3 providers like Supabase S3 or AWS S3 use virtual-host style (forcePathStyle: false).
+        forcePathStyle = Boolean(endpoint && (endpoint.includes("localhost") || endpoint.includes("127.0.0.1") || endpoint.includes("minio")));
       }
+
+      const clientConfig: any = {
+        region,
+        credentials: {
+          accessKeyId,
+          secretAccessKey,
+        },
+        forcePathStyle,
+      };
+
+      if (endpoint) {
+        clientConfig.endpoint = endpoint;
+      }
+
+      const client = new S3Client(clientConfig);
+
+      // Ensure bucket exists (idempotent for local MinIO; graceful fallback for Supabase/AWS S3 pre-existing buckets).
+      try {
+        const { HeadBucketCommand, CreateBucketCommand } = await import("@aws-sdk/client-s3");
+        try {
+          await client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+        } catch {
+          try {
+            await client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+          } catch {
+            // Ignore bucket creation failures (e.g. Supabase S3 where buckets are pre-created and CreateBucket via S3 API is unsupported)
+          }
+        }
+      } catch {
+        // Ignore initialization bucket check errors
+      }
+
       this.client = client;
       return client;
     } catch (err) {
@@ -95,6 +128,11 @@ class S3ObjectStorageService implements ObjectStorageService {
       const body = res.Body;
       if (!body) return null;
       if (Buffer.isBuffer(body)) return body;
+      if (body instanceof Uint8Array) return Buffer.from(body);
+      if (typeof (body as any).transformToByteArray === "function") {
+        const bytes = await (body as any).transformToByteArray();
+        return Buffer.from(bytes);
+      }
       // Streaming body → collect.
       const chunks: Buffer[] = [];
       for await (const chunk of body as AsyncIterable<Uint8Array>) chunks.push(Buffer.from(chunk));
