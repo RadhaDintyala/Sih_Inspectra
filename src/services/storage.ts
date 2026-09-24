@@ -57,9 +57,7 @@ class S3ObjectStorageService implements ObjectStorageService {
       const { S3Client } = await import("@aws-sdk/client-s3");
       const rawEndpoint = process.env.S3_ENDPOINT?.trim().replace(/\/+$/, "");
       const endpoint = rawEndpoint && rawEndpoint.length > 0 ? rawEndpoint : undefined;
-      const isSupabase = Boolean(endpoint && endpoint.includes("supabase.co"));
-      // Supabase Storage S3 gateway verifies SigV4 signatures under us-east-1 scope
-      const region = isSupabase ? "us-east-1" : (process.env.S3_REGION?.trim() || "us-east-1");
+      const region = process.env.S3_REGION?.trim() || "us-east-1";
       const accessKeyId = (process.env.S3_ACCESS_KEY || "minioadmin").trim();
       const secretAccessKey = (process.env.S3_SECRET_KEY || "minioadmin").trim();
 
@@ -92,6 +90,7 @@ class S3ObjectStorageService implements ObjectStorageService {
 
       const client = new S3Client(clientConfig);
 
+      const isSupabase = Boolean(endpoint && endpoint.includes("supabase.co"));
       // Ensure bucket exists for local MinIO; skip bucket creation commands for Supabase/AWS S3 pre-created buckets.
       if (!isSupabase) {
         try {
