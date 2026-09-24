@@ -82,6 +82,8 @@ class S3ObjectStorageService implements ObjectStorageService {
           secretAccessKey,
         },
         forcePathStyle,
+        requestChecksumCalculation: "WHEN_REQUIRED",
+        responseChecksumValidation: "WHEN_REQUIRED",
       };
 
       if (endpoint) {
