@@ -57,7 +57,9 @@ class S3ObjectStorageService implements ObjectStorageService {
       const { S3Client } = await import("@aws-sdk/client-s3");
       const rawEndpoint = process.env.S3_ENDPOINT?.trim().replace(/\/+$/, "");
       const endpoint = rawEndpoint && rawEndpoint.length > 0 ? rawEndpoint : undefined;
-      const region = process.env.S3_REGION?.trim() || "us-east-1";
+      const isSupabase = Boolean(endpoint && endpoint.includes("supabase.co"));
+      // Supabase Storage S3 gateway verifies SigV4 signatures under us-east-1 scope
+      const region = isSupabase ? "us-east-1" : (process.env.S3_REGION?.trim() || "us-east-1");
       const accessKeyId = (process.env.S3_ACCESS_KEY || "minioadmin").trim();
       const secretAccessKey = (process.env.S3_SECRET_KEY || "minioadmin").trim();
 
@@ -90,20 +92,22 @@ class S3ObjectStorageService implements ObjectStorageService {
 
       const client = new S3Client(clientConfig);
 
-      // Ensure bucket exists (idempotent for local MinIO; graceful fallback for Supabase/AWS S3 pre-existing buckets).
-      try {
-        const { HeadBucketCommand, CreateBucketCommand } = await import("@aws-sdk/client-s3");
+      // Ensure bucket exists for local MinIO; skip bucket creation commands for Supabase/AWS S3 pre-created buckets.
+      if (!isSupabase) {
         try {
-          await client.send(new HeadBucketCommand({ Bucket: this.bucket }));
-        } catch {
+          const { HeadBucketCommand, CreateBucketCommand } = await import("@aws-sdk/client-s3");
           try {
-            await client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+            await client.send(new HeadBucketCommand({ Bucket: this.bucket }));
           } catch {
-            // Ignore bucket creation failures (e.g. Supabase S3 where buckets are pre-created and CreateBucket via S3 API is unsupported)
+            try {
+              await client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+            } catch {
+              // Ignore bucket creation failures
+            }
           }
+        } catch {
+          // Ignore initialization bucket check errors
         }
-      } catch {
-        // Ignore initialization bucket check errors
       }
 
       this.client = client;
