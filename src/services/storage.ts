@@ -119,11 +119,31 @@ class S3ObjectStorageService implements ObjectStorageService {
   }
 
   async putObject(key: string, buffer: Buffer, mimeType: string): Promise<StoredObjectMetadata> {
-    const client = await this.getClient();
-    const { PutObjectCommand } = await import("@aws-sdk/client-s3");
-    await client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: buffer, ContentType: mimeType }));
-    const checksum = crypto.createHash("sha256").update(buffer).digest("hex");
-    return { key, size: buffer.length, mimeType, checksum, createdAt: new Date().toISOString(), url: this.getUrl(key), backend: "s3" };
+    const rawEndpoint = process.env.S3_ENDPOINT?.trim().replace(/\/+$/, "");
+    let hostOnly = "default-aws-s3";
+    let port = "443";
+    let protocol = "https:";
+    if (rawEndpoint) {
+      try {
+        const parsedUrl = new URL(rawEndpoint);
+        hostOnly = parsedUrl.hostname;
+        port = parsedUrl.port || (parsedUrl.protocol === "http:" ? "80" : "443");
+        protocol = parsedUrl.protocol;
+      } catch {
+        hostOnly = rawEndpoint;
+      }
+    }
+    console.log(`[DIAGNOSTIC] service=Storage operation=PutObject hostname=${hostOnly} port=${port} protocol=${protocol} key=${key}`);
+    try {
+      const client = await this.getClient();
+      const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+      await client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: buffer, ContentType: mimeType }));
+      const checksum = crypto.createHash("sha256").update(buffer).digest("hex");
+      return { key, size: buffer.length, mimeType, checksum, createdAt: new Date().toISOString(), url: this.getUrl(key), backend: "s3" };
+    } catch (err: any) {
+      console.error(`[DIAGNOSTIC_ERROR] service=Storage operation=PutObject hostname=${hostOnly} port=${port} protocol=${protocol} errorName=${err?.name} errorCode=${err?.code || err?.$metadata?.httpStatusCode} errorMessage=${err?.message} stack=${err?.stack} cause=${err?.cause ? (err.cause.stack || err.cause.message || String(err.cause)) : undefined}`);
+      throw err;
+    }
   }
 
   async getObject(key: string): Promise<Buffer | null> {

@@ -224,10 +224,10 @@ export async function POST(request: NextRequest) {
     const syncRequested =
       process.env.TEST_MODE === "true" || request.nextUrl.searchParams.get("sync") === "true";
 
-    console.log(`[Scan API] Inspection ${inspectionId}: ${inputImages.length} image(s), org ${orgId}, mode=${syncRequested ? "sync" : "async"}`);
+    console.log(`[DIAGNOSTIC] step=1_PARSE_INPUT inspectionId=${inspectionId} inputImages=${inputImages.length} orgId=${orgId} mode=${syncRequested ? "sync" : "async"}`);
 
     if (syncRequested) {
-      // Tests and explicit opt-in: run the REAL pipeline inline.
+      console.log(`[DIAGNOSTIC] step=2_EXECUTE_SYNC service=PipelineWorker inspectionId=${inspectionId}`);
       const inspection = await inspectionQueue.executeSync({
         inspectionId,
         organizationId: orgId,
@@ -252,10 +252,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Production: persist a QUEUED inspection row FIRST (so status polling
-    // never 404s), then stage evidence and hand off to the worker fleet.
-    // In dev, an inline pump inside the API process consumes the queue when
-    // no dedicated worker is running — a single `npm run dev` just works.
     const initialInspection = {
       id: inspectionId,
       organizationId: orgId,
@@ -269,6 +265,7 @@ export async function POST(request: NextRequest) {
       notes: [`Evidence received (${inputImages.length} frame(s)). Queued for analysis.`],
       extractionSource: "YOLO + Regional OCR",
     };
+    console.log(`[DIAGNOSTIC] step=2_DB_SAVE_INITIAL service=Database inspectionId=${inspectionId}`);
     await saveInspection(initialInspection);
     await recordStatusChange(inspectionId, null, "processing", userId, "Inspection queued");
     await logAuditEvent({
@@ -287,6 +284,7 @@ export async function POST(request: NextRequest) {
       side: (img.side ?? "unknown") as StagedImageDescriptor["side"],
       sourceCamera: img.sourceCamera,
     }));
+    console.log(`[DIAGNOSTIC] step=3_ENQUEUE_STAGED service=Queue_Storage inspectionId=${inspectionId} stagedCount=${staged.length}`);
     const record = await inspectionQueue.enqueueStaged(
       { inspectionId, organizationId: orgId, userId, packageCategory, source, ecommerceUrl, ecommerceProduct, physicalMeasurements, physicalScale, staged },
       inputImages.map((img) => img.buffer)
@@ -303,9 +301,9 @@ export async function POST(request: NextRequest) {
       },
       { status: 202 }
     );
-  } catch (err) {
+  } catch (err: any) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[Scan API] Processing error:", msg);
+    console.error(`[DIAGNOSTIC_ERROR] service=ScanAPI operation=POST_api_scan errorName=${err?.name} errorCode=${err?.code} errorMessage=${msg} stack=${err?.stack} cause=${err?.cause ? (err.cause.stack || err.cause.message || String(err.cause)) : undefined}`);
     return NextResponse.json({ error: "EXTRACTION_FAILED", message: msg }, { status: 500 });
   }
 }
