@@ -55,7 +55,7 @@ class S3ObjectStorageService implements ObjectStorageService {
     if (this.initError) throw new Error(this.initError);
     try {
       const { S3Client } = await import("@aws-sdk/client-s3");
-      const rawEndpoint = process.env.S3_ENDPOINT?.trim();
+      const rawEndpoint = process.env.S3_ENDPOINT?.trim().replace(/\/+$/, "");
       const endpoint = rawEndpoint && rawEndpoint.length > 0 ? rawEndpoint : undefined;
       const region = process.env.S3_REGION?.trim() || "us-east-1";
       const accessKeyId = (process.env.S3_ACCESS_KEY || "minioadmin").trim();
