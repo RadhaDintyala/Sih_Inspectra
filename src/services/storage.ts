@@ -68,9 +68,11 @@ class S3ObjectStorageService implements ObjectStorageService {
       } else if (envForcePathStyle === "false") {
         forcePathStyle = false;
       } else {
-        // Path-style addressing is required for local MinIO (e.g. localhost/127.0.0.1)
-        // Cloud S3 providers like Supabase S3 or AWS S3 use virtual-host style (forcePathStyle: false).
-        forcePathStyle = Boolean(endpoint && (endpoint.includes("localhost") || endpoint.includes("127.0.0.1") || endpoint.includes("minio")));
+        // Custom S3 endpoints (such as Supabase S3 at https://<ref>.supabase.co/storage/v1/s3 or local MinIO)
+        // require forcePathStyle: true. Using virtual-host style (forcePathStyle: false) prepends the bucket name
+        // to the endpoint host (e.g. inspectra-storage.<ref>.supabase.co), causing SSL SNI certificate mismatches
+        // and triggering EPROTO TLS handshake failures (SSL alert number 40).
+        forcePathStyle = Boolean(endpoint);
       }
 
       const clientConfig: any = {

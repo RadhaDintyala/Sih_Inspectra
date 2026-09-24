@@ -22,7 +22,7 @@ describe("S3ObjectStorageService environment configuration", () => {
     expect(storage.backendName()).toBe("s3");
   });
 
-  it("configures Supabase S3 correctly with custom endpoint and forcePathStyle=false", async () => {
+  it("configures Supabase S3 correctly with custom endpoint and forcePathStyle=true", async () => {
     process.env.S3_ENDPOINT = "https://testproj.supabase.co/storage/v1/s3";
     process.env.S3_BUCKET = "inspectra-storage";
     process.env.S3_ACCESS_KEY = "test-access-key";
